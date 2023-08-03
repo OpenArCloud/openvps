@@ -1,5 +1,9 @@
 # Open Visual Positioning System (VPS)
 
+**Prototypes**
+
+hLoc prototype ➡️ [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/12PIjDUXWqyZrYTtuhQHuwOvdcHeItrpW)
+
 **Related Projects**
 
 - [OGC GeoPose](https://www.geopose.org/)

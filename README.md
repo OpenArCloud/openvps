@@ -1,4 +1,4 @@
-# Open Visual Positioning System (VPS)
+# Open Visual Positioning System (OpenVPS)
 
 **Prototypes**
 

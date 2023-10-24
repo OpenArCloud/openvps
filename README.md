@@ -3,6 +3,7 @@
 **Prototypes**
 
 hLoc prototype ➡️ [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/12PIjDUXWqyZrYTtuhQHuwOvdcHeItrpW?usp=sharing)
+
 ACE prototype ➡️ [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1G3q4Wr4GAzFMeonCMfwoexDIdEAMEYDn?usp=sharing)
 
 **Related Projects**

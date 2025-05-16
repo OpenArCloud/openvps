@@ -1,0 +1,18 @@
+# Copyright 2025 Nokia
+# Licensed under the MIT License.
+# SPDX-License-Identifier: MIT
+
+services:
+  mapaligner:
+    image: mapaligner
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    ports:
+      - ${PORT}:3001
+    environment:
+      - AUTH_SECRET=${AUTH_SECRET}
+      - AUTH_FUSIONAUTH_ID=${AUTH_FUSIONAUTH_ID}
+      - AUTH_FUSIONAUTH_SECRET=${AUTH_FUSIONAUTH_SECRET}
+      - AUTH_FUSIONAUTH_ISSUER=${AUTH_FUSIONAUTH_ISSUER}
+      - MAPBUILDER_URL=${MAPBUILDER_URL}

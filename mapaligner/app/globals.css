@@ -1,0 +1,9 @@
+/**
+ * Copyright 2025 Nokia
+ * Licensed under the MIT License.
+ * SPDX-License-Identifier: MIT
+ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

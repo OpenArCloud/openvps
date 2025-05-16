@@ -1,0 +1,200 @@
+{
+	"env": {
+		"browser": true,
+		"es6": true
+	},
+	"extends": [
+		"eslint:recommended",
+		"plugin:@typescript-eslint/eslint-recommended",
+		"plugin:svelte/recommended"
+	],
+	"globals": {
+		"Atomics": "readonly",
+		"SharedArrayBuffer": "readonly"
+	},
+	"ignorePatterns": ["src/lib/*"],
+	"parser": "@typescript-eslint/parser",
+	"parserOptions": {
+		"ecmaFeatures": {
+			"jsx": false
+		},
+		"ecmaVersion": 2018,
+		"sourceType": "module",
+		"extraFileExtensions": [".svelte"]
+	},
+	"overrides": [
+		{
+			"files": ["*.svelte"],
+			"parser": "svelte-eslint-parser",
+			"parserOptions": {
+				"parser": "@typescript-eslint/parser"
+			}
+		}
+	],
+	"plugins": [
+		"@typescript-eslint",
+		"import-quotes",
+		"@babel",
+		"svelte"
+	],
+	"rules": {
+		"array-bracket-spacing": [
+			"error",
+			"never"
+		],
+		"@babel/semi": "error",
+		"block-spacing": [
+			"error",
+			"always"
+		],
+		"brace-style": [
+			"error",
+			"1tbs",
+			{
+				"allowSingleLine": true
+			}
+		],
+		"comma-spacing": [
+			"error",
+			{
+				"before": false,
+				"after": true
+			}
+		],
+		"comma-style": [
+			"error",
+			"last"
+		],
+		"computed-property-spacing": [
+			"error",
+			"never"
+		],
+		"eol-last": [
+			"error",
+			"always"
+		],
+		"eqeqeq": [
+			"error",
+			"always",
+			{
+				"null": "ignore"
+			}
+		],
+		"func-call-spacing": [
+			"error",
+			"never"
+		],
+		"import-quotes/import-quotes": [
+			"error",
+			"single"
+		],
+		"indent": [
+			"error",
+			"tab",
+			{ "SwitchCase": 1 }
+		],
+		"key-spacing": [
+			"error",
+			{
+				"beforeColon": false,
+				"afterColon": true
+			}
+		],
+		"keyword-spacing": [
+			"error",
+			{
+				"before": true,
+				"after": true
+			}
+		],
+		"linebreak-style": [
+			"error",
+			"unix"
+		],
+		"new-parens": [
+			"error",
+			"always"
+		],
+		"no-mixed-spaces-and-tabs": [
+			"error"
+		],
+		"no-multi-spaces": [
+			"error",
+			{
+				"ignoreEOLComments": true
+			}
+		],
+		"no-nested-ternary": [
+			"error"
+		],
+		"no-trailing-spaces": [
+			"error"
+		],
+		"no-unneeded-ternary": [
+			"error"
+		],
+		"no-unused-vars": "off",
+		"@typescript-eslint/no-unused-vars": [
+			"error"
+		],
+		"no-whitespace-before-property": [
+			"error"
+		],
+		"object-curly-spacing": [
+			"error",
+			"always"
+		],
+		"semi": [
+			"error",
+			"always"
+		],
+		"semi-spacing": [
+			"error",
+			{
+				"before": false,
+				"after": true
+			}
+		],
+		"semi-style": [
+			"error",
+			"last"
+		],
+		"space-in-parens": [
+			"error",
+			"never"
+		],
+		"space-infix-ops": [
+			"error"
+		],
+		"space-unary-ops": [
+			"error",
+			{
+				"words": false,
+				"nonwords": false
+			}
+		],
+		"switch-colon-spacing": [
+			"error",
+			{
+				"before": false,
+				"after": true
+			}
+		],
+		"template-curly-spacing": [
+			"error",
+			"always"
+		],
+		"prefer-const": "error",
+		"svelte/indent": [
+			"error",
+			{
+				"indent": "tab",
+				"ignoredNodes": [],
+				"switchCase": 1,
+				"alignAttributesVertically": true
+			}
+		]
+	},
+	"settings": {
+	}
+}

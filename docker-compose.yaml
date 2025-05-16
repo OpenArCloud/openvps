@@ -1,0 +1,122 @@
+# Copyright 2025 Nokia
+# Licensed under the MIT License.
+# SPDX-License-Identifier: MIT
+
+name: openvps
+services:
+  backend:
+    build:
+      context: mapbuilder/Backend
+      additional_contexts:
+        - hloc_context=Hierarchical-Localization
+        - scripts_context=mapbuilder/scripts_mapping
+      dockerfile: Dockerfile
+      args:
+        - HTTP_PROXY=${MY_HTTP_PROXY}
+        - HTTPS_PROXY=${MY_HTTPS_PROXY}
+        - USER_ID=${MY_USER_ID}
+        - GROUP_ID=${MY_GROUP_ID}
+    healthcheck:
+      test: [ "CMD", "curl", "--noproxy", "*", "--fail", "--silent", "--write-out", "'HTTP %{http_code}'", "http://localhost:3000/healthcheck" ]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+    expose:
+      - 3000
+    environment:
+      - AUTH_FUSIONAUTH_ID=${AUTH_FUSIONAUTH_ID}
+      - AUTH_FUSIONAUTH_SECRET=${AUTH_FUSIONAUTH_SECRET}
+      - AUTH_FUSIONAUTH_ISSUER=${AUTH_FUSIONAUTH_ISSUER}
+      - AUTH_SECRET=${AUTH_SECRET}
+      - MAPLOCALIZER_URL=http://maplocalizer:8000
+      - DEFAULT_LONGITUDE=${DEFAULT_LONGITUDE}
+      - DEFAULT_LATITUDE=${DEFAULT_LATITUDE}
+      - DEFAULT_HEIGHT=${DEFAULT_HEIGHT}
+      - NODE_TLS_REJECT_UNAUTHORIZED=0
+    volumes:
+      - ${MY_SHARED_MAPS_DIR}:/uploads
+    shm_size: 4GB
+    deploy:
+      # https://docs.docker.com/reference/compose-file/deploy/
+      restart_policy:
+        condition: on-failure
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1 # alternatively, use `count: all` for all GPUs
+              capabilities: [gpu]
+
+  mapaligner:
+    build:
+      context: mapaligner
+      dockerfile: Dockerfile
+      args:
+        - HTTP_PROXY=${MY_HTTP_PROXY}
+        - HTTPS_PROXY=${MY_HTTPS_PROXY}
+        - NEXT_PUBLIC_DEFAULT_LONGITUDE=${DEFAULT_LONGITUDE}
+        - NEXT_PUBLIC_DEFAULT_LATITUDE=${DEFAULT_LATITUDE}
+        - NEXT_PUBLIC_DEFAULT_HEIGHT=${DEFAULT_HEIGHT}
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      - AUTH_FUSIONAUTH_ID=${AUTH_FUSIONAUTH_ID}
+      - AUTH_FUSIONAUTH_SECRET=${AUTH_FUSIONAUTH_SECRET}
+      - AUTH_FUSIONAUTH_ISSUER=${AUTH_FUSIONAUTH_ISSUER}
+      - AUTH_SECRET=${AUTH_SECRET}
+      - AUTH_URL=${MAPALIGNER_URL}
+      - AUTH_TRUST_HOST=1
+      - MAPBUILDER_URL=http://backend:3000
+      - NEXT_PUBLIC_DEFAULT_LONGITUDE=${DEFAULT_LONGITUDE}
+      - NEXT_PUBLIC_DEFAULT_LATITUDE=${DEFAULT_LATITUDE}
+      - NEXT_PUBLIC_DEFAULT_HEIGHT=${DEFAULT_HEIGHT}
+      - NODE_TLS_REJECT_UNAUTHORIZED=0
+    ports:
+      - ${MAPALIGNER_PORT}:3001
+
+  maplocalizer:
+    build:
+      context: maplocalizer
+      dockerfile: Dockerfile
+      additional_contexts:
+        - hloc_context=Hierarchical-Localization
+      args:
+        - HTTP_PROXY=${MY_HTTP_PROXY}
+        - HTTPS_PROXY=${MY_HTTPS_PROXY}
+    depends_on:
+      backend:
+        condition: service_healthy
+    volumes:
+      - ${MY_SHARED_MAPS_DIR}:/uploads
+    deploy:
+      # https://docs.docker.com/reference/compose-file/deploy/
+      restart_policy:
+        condition: on-failure
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              # alternatively, use `count: all` for all GPUs
+              count: 1
+              capabilities: [gpu]
+    shm_size: 4GB
+    ports:
+      - ${MAPLOCALIZER_PORT}:8000
+
+  frontend:
+    build:
+      context: mapbuilder/Frontend
+      dockerfile: Dockerfile
+      args:
+        - HTTP_PROXY=${MY_HTTP_PROXY}
+        - HTTPS_PROXY=${MY_HTTPS_PROXY}
+        - MAPALIGNER_URL=${MAPALIGNER_URL}
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - ${MAPBUILDER_PORT}:80
+      - ${MAPBUILDER_PORT_HTTPS}:443
+    volumes:
+      - ./mapbuilder/certs:/etc/nginx/certs:RO

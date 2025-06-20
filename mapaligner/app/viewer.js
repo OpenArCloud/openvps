@@ -36,18 +36,31 @@ export default function ThreeJsViewer({
     ? "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
     : "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
 
+  const [viewState, setViewState] = useState({
+    longitude,
+    latitude,
+    zoom: 19,
+    pitch: 30,
+  });
+
+  useEffect(() => {
+    setViewState((viewState) => {
+      return {
+        ...viewState,
+        longitude,
+        latitude,
+      };
+    });
+  }, [longitude, latitude]);
+
   return (
     <div style={{ height: "100%" }}>
       <Map
         antialias
-        initialViewState={{
-          latitude: latitude,
-          longitude: longitude,
-          zoom: 19,
-          pitch: 30,
-        }}
+        {...viewState}
         maxPitch={85}
         mapStyle={mapStyleUrl}
+        onMove={(evt) => setViewState(evt.viewState)}
         onMouseDown={(event) => onPick(event)}
       >
         {debugGeoPose ? (

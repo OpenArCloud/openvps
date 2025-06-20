@@ -14,7 +14,12 @@
     };
 </script>
 
-<Dialog.Root closeOnOutsideClick={true} bind:open={$appStore.confirmDialog.visible} {onOpenChange}>
+<Dialog.Root
+    closeOnOutsideClick={true}
+    bind:open={$appStore.confirmDialog.visible}
+    {onOpenChange}
+    closeOnEscape={false}
+>
     <Dialog.Content class="sm:max-w-[425px]">
         <Dialog.Header>
             <Dialog.Title>Confirm</Dialog.Title>

@@ -256,13 +256,14 @@ export function startRestService(statuses: DataSetStatus[], config: Environmenta
                 signal: AbortSignal.timeout(3000)
             });
             if(!selectQuery.ok){
-                res.status(500).send((await selectQuery.json()).ERROR);
+                const selectResponse = await selectQuery.json();
+                res.status(500).send(selectResponse.ERROR);
             }else{
                 res.status(200).send("OK");
             }
         }catch(error){
             if(error.name === "TimeoutError"){
-                res.status(200).send("OK");
+                res.status(200).send("Loading localization map.\nThis may take several minutes, please wait.");
             }else{
                 res.status(500).send(error.toString());
                 console.error(error);

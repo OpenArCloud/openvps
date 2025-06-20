@@ -113,16 +113,15 @@ export default function Matcher() {
       const { lat, lng } = event.lngLat;
       setLongitude(lng);
       setLatitude(lat);
-      document.getElementById("poi-selector").value = "custom";
       setRefMouseEnabled(false);
     }
   }
 
-  console.log("longitude", longitude);
+  /*console.log("longitude", longitude);
   console.log("latitude", latitude);
   console.log("translation", translation);
   console.log("rotatiton", rotation);
-  console.log("scale", scale);
+  console.log("scale", scale);*/
 
   const matrix = new Matrix4().compose(
     translation,
@@ -130,7 +129,7 @@ export default function Matcher() {
     new Vector3(scale, scale, scale)
   );
   const matrix4x4 = reshape4x4(matrix.clone().transpose().toArray());
-  console.log("matrix4x4", matrix4x4);
+  //console.log("matrix4x4", matrix4x4);
 
   // prettier-ignore
   const output = JSON.stringify(
@@ -267,14 +266,7 @@ export default function Matcher() {
                     <RotationInput component="x" rotation={rotation} setRotation={setRotation} />
                     <RotationInput component="y" rotation={rotation} setRotation={setRotation} />
                     <RotationInput component="z" rotation={rotation} setRotation={setRotation} />
-                    <TransformInput
-                      title="Scale"
-                      value={scale}
-                      setter={setScale}
-                      min={0.1}
-                      max={5}
-                      step={0.01}
-                    />
+                    <ScaleInput scale={scale} setScale={setScale} />
                     <TransformInput
                       title="Point Size"
                       value={pointSize}
@@ -496,6 +488,24 @@ function TransformInput({ value, setter, title, min, max, step = 0.1, display = 
           min={min}
           max={max}
           step={step}
+          style={{ width: "100%", marginLeft: 0, marginRight: 0 }}
+        />
+      </div>
+    </>
+  );
+}
+
+function ScaleInput({ scale, setScale }) {
+  return (
+    <>
+      <div>
+        Scale: {scale}
+        <input
+          type="number"
+          className="input input-bordered input-sm w-full"
+          onChange={(event) => setScale(event.target.value)}
+          value={scale}
+          step={0.01}
           style={{ width: "100%", marginLeft: 0, marginRight: 0 }}
         />
       </div>

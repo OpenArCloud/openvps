@@ -43,12 +43,22 @@ This is a web service that takes an HLOC map and localizes a query image in it. 
 
 Also see [README](maplocalizer/README.md)
 
-
 ### Authentication
-We use FusionAuth for authentication to protect the maps. Download and run FusionAuth locally in Docker. See [this](/docs/FusionAuth.md) documentation on how to configure FusionAuth.
+We use FusionAuth for OAuth2 authentication to protect the maps. We chose it because it can run locally on the host machine. Download and run FusionAuth locally in Docker. See [this](/docs/FusionAuth.md) documentation on how to configure FusionAuth.
 
 
 ## Setup
+
+The mapbuilder and maplocalizer require an nvidia GPU, at least in the ballpark of GeForce 1080 but a more powerful one is recommended.
+
+You will also need an own domain name and a corresponding SSL certificate, and you need to forward 4 ports to your host machine. It is recommended to run NGINX on your host machine to terminate the TLS tunnels and forward the connections to the openvps containers that run HTTP servers.
+
+
+Install `docker` and `nvidia-container-toolkit` ([link](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)) so that the containers can have GPU access.
+
+
+Continue with the installation and configuration of the authentication, see the description in [this](/docs/FusionAuth.md) document. You will need to create a tenant and an application. Mark the  client ID and client secret of your new application, these will be filled later into our environment variables `AUTH_FUSIONAUTH_ID` and `AUTH_FUSIONAUTH_SECRET`. The `AUTH_SECRET` is a secret generated with `openssl` and it must be the same for all client applications that want to use this authentication service.
+
 
 Clone this repository:
 ```
@@ -72,7 +82,7 @@ Write a `docker.env` configuration file based on this template:
 MY_HTTP_PROXY=
 MY_HTTPS_PROXY=
 
-# User ID and Group ID for shared files and directories (default 1000:1000)
+# User and group id of your host user if you want to be able to read/write the map files outside docker. You can get these by the 'id' command in the host Ubuntu
 MY_USER_ID=1000
 MY_GROUP_ID=1000
 
@@ -87,26 +97,26 @@ MY_SHARED_MAPS_DIR=${HOME}/data/maps
 # Auth.JS env variables
 AUTH_FUSIONAUTH_ID=
 AUTH_FUSIONAUTH_SECRET=
-AUTH_FUSIONAUTH_ISSUER=
+AUTH_FUSIONAUTH_ISSUER=https://your.domain.name:your_external_auth_port
 AUTH_SECRET=
 
 
-# -- MapBuilder configuration
-
-# Frontend port configuration (default 80 and 443)
+# -- MapBuilder (frontend) configuration
+# This is the port that you can access on localhost. The 'frontend' container listens on these two ports.
 MAPBUILDER_PORT=80
 MAPBUILDER_PORT_HTTPS=443
 
 # -- MapAligner configuration
-
-# Port configuration
-MAPALIGNER_PORT=your_internal_mapaligner_port
+# This is the port that you can access on localhost. The 'mapaligner' container listens on this port.
+MAPALIGNER_PORT=your_host_mapaligner_port
+# This is your external URL from the Internet, assuming that you configured NGINX to map from your_external_mapaligner_port to your_internal_mapaligner_port
 MAPALIGNER_URL=https://your.domain.name:your_external_mapaligner_port
 
 # -- MapLocalizer configuration
-
-# Port configuration
-MAPLOCALIZER_PORT=your_internal_maplocalizer_port
+# This is the port that you can access on localhost. The 'maplocalizer' container listens on this port.
+MAPLOCALIZER_PORT=your_host_maplocalizer_port
+# This is your external URL from the Internet, assuming that you configured NGINX to map from your_external_maplocalizer_port to your_host_maplocalizer_port
+MAPLOCALIZER_URL=https://your.domain.name:your_external_maplocalizer_port
 ```
 
 
@@ -126,12 +136,10 @@ For example, let us assume that the following _internal_ ports are used:
 
 The corresponding example configuration is shown below:
 ```
-MY_HTTP_FRONTEND_PORT=18047
-MY_HTTPS_FRONTEND_PORT=18443
-
 MAPALIGNER_PORT=18048
 MAPALIGNER_URL=https://openvps.org:8048
-#MAPBUILDER_PORT=18047
+MAPBUILDER_PORT=18047
+MAPBUILDER_PORT_HTTPS=18443
 MAPBUILDER_URL=https://openvps.org:8047
 MAPLOCALIZER_PORT=18046
 MAPLOCALIZER_URL=https://openvps.org:8046
@@ -152,6 +160,29 @@ Stop services:
 docker compose --env-file docker.env --progress=plain down
 ```
 
+## Usage
+
+### Recording
+Once you got your OpenVPS services running, you will need to create your first map. Our first version supports map creation from iOS RGBD+pose recordings, which can be recorded with the free and open [StrayScanner](https://docs.strayrobots.io/) app. Record a sequence while making sure that you move slowly, you cover the building facades from a distance, and you make loops in your trajectory. Do not go too close to objects, avoid textureless areas, avoid shiny and mirroring surfaces like glass, and do not rotate the phone in one place. At the beginning, we recommend to experiment with recordings of about 1 minute in length.
+
+### Upload
+Once you recorded a sequence, go to the iOS Files app on your phone, find the files on your phone, and the StrayScanner folder within. Select your recording's folder and compress it to a zip file. Open your mapbuilder URL in Safari, log in, and upload your zip file. This may take up to a few minutes depending on your connection speed and the size of the recording.
+
+### MapBuilder
+Once you uploaded your image sequence dataset, it will get a unique ID assigned, it gets extracted, the video gets converted to an image sequences, the images get resized and rotated, and a thumbnail gets assigned to the dataset. Now you can start the map building process by pressing the play button. This might take around 10-30 minutes depending on the size of your recording.
+
+### MapAligner
+Once the map is built, more buttons will appear in the dataset's GUI. Next, you need to align the map with the world by clicking on the cross arrows icon, which opens the MapAligner with the corresponding map. First you need to define the coarse location by navigation the map view to your mapped street. Open the 'set reference origin' panel and check 'set reference origin with click'. Click on any point that you want to be the reference of the alignment, it can be any point in the neighborhood. Next, perform the map alignment with the gizmo. You can adjust the scale with the sliders in the left side menu. Finally, press the big green save button, this writes the transform to the MapBuilder.
+
+### MapLocalizer
+Once your map is aligned with the world, it is ready to be served in the MapLocalizer. Click on the localization pin icon of the dataset's GUI, which loads the map into the MapLocalizer. This might take up to 30 seconds depending on the map size. Once the map is loaded, you can send GeoPoseRequest queries to the MapLocalizer's `/localize/geopose` endpoint. 
+
+### VPS Queries
+You can find example clients in Open AR Cloud repositores based on a WebXR client in [spARcl](https://github.com/OpenArCloud/sparcl), a Cesium client in [cesium-viewer](https://github.com/OpenArCloud/cesium-viewer), and C++ and Python console clients in [oscp-geopose-protocol](https://github.com/OpenArCloud/oscp-geopose-protocol).
+
+The camera intrinsics are also required in the queries. If you send queries via spARcl, it submits the camera intrinsics automatically. If you use other clients, you need to find out somehow the intrinsics. The stock Android Photo app writes them into the EXIF metadata of the photos, you can read those out. You can also use images from StrayScanner recordings as queries (same sequence as for mapping or other recording, does not matter), because StrayScanner also saves the intrinsics. The Cesium client reads the intrinsics from the EXIF. The C++ and Python clients take the intrinsics from a JSON file that the user needs to write before the query.
+
+
 
 ## Troubleshooting
 
@@ -166,3 +197,7 @@ Add `NODE_TLS_REJECT_UNAUTHORIZED=0` environment variable to backend and mapalig
 ### [auth][error] TypeError: fetch failed
 
 The identity provider cannot be reached due to either a connection issue or the TLS error above. If self-hosted, check if it is running
+
+### FusionAuth login error
+We found that the FusionAuth container sometimes dies and this results in a misconfiguration error message on the login screen. In this occurs, restart the FusionAuth container.
+

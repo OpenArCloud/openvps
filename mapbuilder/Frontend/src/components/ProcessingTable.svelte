@@ -47,7 +47,7 @@
         }
     };
 
-    const initialPageSize: number = 10;
+    const initialPageSize: number = 50;
     const getRowEnd = (pageIndex: number) => {
         const numRows = $processingStore.value.length;
         const numPages = Math.floor(numRows / initialPageSize);

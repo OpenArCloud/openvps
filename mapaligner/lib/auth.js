@@ -12,12 +12,12 @@ const providers = [
     // TODO these props are a workaround, remove them after this gets merged
     // https://github.com/nextauthjs/next-auth/pull/10868
     userinfo: process.env.AUTH_FUSIONAUTH_ISSUER + "/oauth2/userinfo",
-    /*authorization: {
+    authorization: {
       url: process.env.AUTH_FUSIONAUTH_ISSUER + "/oauth2/authorize",
       params: {
-        scope: "offline_access",
+        scope: "offline_access openid profile email",
       },
-    },*/
+    },
     token: {
       url: process.env.AUTH_FUSIONAUTH_ISSUER + "/oauth2/token",
       conform: async (response) => {

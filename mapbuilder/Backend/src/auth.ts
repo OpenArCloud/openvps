@@ -17,7 +17,7 @@ export const authConfig: ExpressAuthConfig = {
             // https://github.com/nextauthjs/next-auth/pull/10868
             userinfo: process.env.AUTH_FUSIONAUTH_ISSUER + "/oauth2/userinfo",
             authorization: {
-                //url: process.env.AUTH_FUSIONAUTH_ISSUER + "/oauth2/authorize",
+                url: process.env.AUTH_FUSIONAUTH_ISSUER + "/oauth2/authorize",
                 params: {
                     scope: "offline_access openid profile email",
                 },

@@ -44,7 +44,8 @@ This step will create the application's client ID and client secret.
 An API key is optional, not needed for now
 
 2. OAuth tab
-TODO: rewrite these URLs before publication
+
+Assuming that your public URL is `https://openvps.org` and the OpenVPS components are reachable via external ports 8046,8047,8048, the following URLs need to be configured.
 
 add Authorized redirect URLs:
  - https://openvps.org:8047/auth/callback/fusionauth (mapbuilder)

@@ -29,7 +29,7 @@
     "lint": "eslint '**/*.{js,ts}' --quiet --fix"
   },
   "dependencies": {
-    "@auth/express": "^0.8.4",
+    "@auth/express": "^0.10.1",
     "connect-busboy": "^1.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

@@ -243,12 +243,20 @@
                 if (!response.ok) {
                     response.text().then((error) => {
                         alert("Could not select map: " + error);
+
+                        $processingStore.fetch();
+                        $localizerStore.fetch();
                     });
-                }else{
-                    alert(`Loading localization map.\nThis may take several minutes, please wait.`);
+                } else {
+                    response.text().then((message) => {
+                        if (message !== "OK") {
+                            alert(message);
+                        }
+
+                        $processingStore.fetch();
+                        $localizerStore.fetch();
+                    });
                 }
-                $processingStore.fetch();
-                $localizerStore.fetch();
             })
             .catch((err) => {
                 console.error(err);

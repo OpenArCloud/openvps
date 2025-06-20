@@ -17,7 +17,12 @@
     let mapName = "";
 </script>
 
-<Dialog.Root closeOnOutsideClick={true} bind:open={$appStore.renameDialog.visible} {onOpenChange}>
+<Dialog.Root
+    closeOnOutsideClick={true}
+    bind:open={$appStore.renameDialog.visible}
+    {onOpenChange}
+    closeOnEscape={false}
+>
     <Dialog.Content class="sm:max-w-[425px]">
         <Dialog.Header>
             <Dialog.Title>Rename {$appStore.renameDialog.oldName}</Dialog.Title>

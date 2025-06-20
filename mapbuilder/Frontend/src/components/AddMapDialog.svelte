@@ -5,12 +5,11 @@
 -->
 
 <script lang="ts">
-
     /**
-    * Copyright 2025 Nokia
-    * Licensed under the MIT License.
-    * SPDX-License-Identifier: MIT
-    */
+     * Copyright 2025 Nokia
+     * Licensed under the MIT License.
+     * SPDX-License-Identifier: MIT
+     */
 
     import { Button } from "$lib/components/ui/button";
     import * as Dialog from "$lib/components/ui/dialog";
@@ -77,7 +76,12 @@
     }
 </script>
 
-<Dialog.Root closeOnOutsideClick={false} bind:open={$appStore.addDialogVisible} {onOpenChange}>
+<Dialog.Root
+    closeOnOutsideClick={false}
+    bind:open={$appStore.addDialogVisible}
+    {onOpenChange}
+    closeOnEscape={false}
+>
     <Dialog.Content class="sm:max-w-[425px]">
         <Dialog.Header>
             <Dialog.Title>Upload New Map</Dialog.Title>

@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3001",
+    "dev": "next dev -p 8048",
     "build": "next build",
-    "start": "next start -p 3001",
+    "start": "next start -p 8048",
     "lint": "next lint"
   },
   "dependencies": {
@@ -16,7 +16,7 @@
     "mapbox-gl": "^3.9.4",
     "maplibre-gl": "^4.7.1",
     "next": "14.2.23",
-    "next-auth": "^5.0.0-beta.25",
+    "next-auth": "^5.0.0-beta.28",
     "react": "^18.0.0",
     "react-dom": "^18.0.0",
     "react-map-gl": "^7.1.9",

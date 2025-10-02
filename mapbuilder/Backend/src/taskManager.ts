@@ -15,10 +15,7 @@ import {HlocConfig} from "./processing/hloc/hlocConfig";
 export class TaskManager {
     private dataSets = new Map<string, DataSet>();
 
-    constructor(
-        private config: EnvironmentalConfig,
-        private io: Server,
-    ) {}
+    constructor(private config: EnvironmentalConfig, private io: Server) {}
 
     public add(status: DataSetStatus) {
         const uploadLocation = new UploadLocation(this.config.uploadsDir, status.metadata);
@@ -123,6 +120,15 @@ export class TaskManager {
             return dataSet.getHlocSparsePlyDownloadLink(mapId);
         } else {
             console.error("[hloc] No dataset for", id, mapId);
+        }
+    }
+
+    public getHlocZipDownloadLink(id: string, mapId: string): string | undefined {
+        const dataSet = this.dataSets.get(id);
+        if (dataSet) {
+            return dataSet.getHlocZipDownloadLink(mapId);
+        } else {
+            console.error("[hloc] No zip for", id, mapId);
         }
     }
 }

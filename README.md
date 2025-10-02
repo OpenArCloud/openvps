@@ -201,3 +201,12 @@ The identity provider cannot be reached due to either a connection issue or the 
 ### FusionAuth login error
 We found that the FusionAuth container sometimes dies and this results in a misconfiguration error message on the login screen. In this occurs, restart the FusionAuth container.
 
+### CUDA/pytorch incompatibility error: 
+Minimum and Maximum CUDA capability supported by Pytorch depends on the version. If your GPU is older, you may need to downgrade the `torch` package that HLOC installs automatically. There is a commented section in the MapBuilder and MapLocalizer Dockerfiles for that.
+
+
+## Known issues and feature ideas:
+ - map height is not altitude but above ground
+ - only one map can be active at a time (enough for educational purposes)
+ - MapBuilder should have datasets and maps separated from each other, because from one dataset we could create multiple maps by using different HLOC methods and/or parameters.
+ - Support for selecting various HLOC configs on the frontend

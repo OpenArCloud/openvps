@@ -18,12 +18,33 @@ curl -o .env https://raw.githubusercontent.com/FusionAuth/fusionauth-containers/
 ```
 Change `DATABASE_PASSWORD` to something else in `.env`
 
-Change the port (let's say to `8045`, but the default is `9011`) if you want in the `ports` section of `docker-compose.yml`
+Note: If you are begind a proxy server, the `search` container's healthcheck may fail and therefore the compose will fail. In this case, add `--noproxy '*'` to the test command:
+```
+search:
+  healthcheck:
+    test: curl --noproxy '*' --write-out 'HTTP %{http_code}' --fail --silent --output /dev/null http://localhost:9200/
+```
 
+Do the same for the fusionauth:
+```
+fusionauth:
+  healthcheck:
+      test: curl --noproxy '*' --silent --fail http://localhost:9011/api/status -o /dev/null -w "%{http_code}"
+```
 
-2. Start FusionAuth containers in the background by `docker compose up -d`
+Change the port if you want (let's say to `8045`, but the default is `9011`) the `ports` section of `docker-compose.yml`
+```
+fusionauth
+  ports:
+    - 8045:9011
+```
 
-3. Open `http://localhost:8045/admin` (default `http://localhost:8045/admin`)and register an admin account
+2. Optionally, copy the `kickstart.json` from our shared OneDrive folder to `./kickstart/kickstart.json` next to the `docker-compose.yaml` and `.env`. This file contains preconfiguration of our applications and users. But, of course, you can also create one yourself or simply ignore this step and then an empty database will be created.
+
+3. Start FusionAuth containers in the background by `docker compose up -d`
+
+4. Open `http://localhost:8045/admin` (default `http://localhost:8045/admin`)and register an admin account
+
 
 ## Create a new Tenant
 1. Go to Tenants -> New

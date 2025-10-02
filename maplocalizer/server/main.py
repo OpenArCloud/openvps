@@ -43,9 +43,10 @@ localizers = {}
 
 # NOTE(soeroesg): for educational purposes, we have here a DummyLocalizer
 # which always returns the same GeoPose but can be used for testing the GeoPoseProtocol
-currentMapId = "dummy"
-mapConfigs["dummy"] = {}
-localizers["dummy"] = DummyLocalizer()
+kDummyMapId = "dummy"
+mapConfigs[kDummyMapId] = {}
+localizers[kDummyMapId] = DummyLocalizer()
+currentMapId = kDummyMapId
 
 # print the env file
 print(get_settings())
@@ -158,12 +159,14 @@ async def localize(request: Request, response: Response):
         success, versionMajor, versionMinor = verify_version_header(request.headers)
         if not success:
             errorMessage = "The request has no or malformed Accept header. Add the header application/vnd.oscp+json;version=2.0"
+            print(errorMessage)
             response.status_code = status.HTTP_400_BAD_REQUEST
             return {"ERROR" : errorMessage}
         if get_settings().debug:
             print(f"Version: {versionMajor} {versionMinor}")
         if versionMajor != 2 or versionMinor != 0:
             errorMessage = "This server supports only GPP v2.0"
+            print(errorMessage)
             response.status_code = status.HTTP_400_BAD_REQUEST
             return {"ERROR" : errorMessage}
 
@@ -173,12 +176,16 @@ async def localize(request: Request, response: Response):
 
         # Get and decode the image
         if len(gppRequest.sensorReadings.cameraReadings) < 1:
+            errorMessage = "Request has no camera readings"
+            print(errorMessage)
             response.status_code = status.HTTP_400_BAD_REQUEST
-            return {"ERROR":"Request has no camera readings"}
+            return {"ERROR": errorMessage}
 
         if gppRequest.sensorReadings.cameraReadings[0].imageBytes is None:
             response.status_code = status.HTTP_400_BAD_REQUEST
-            return {"ERROR":"Request has no image"}
+            errorMessage = "Request has no image"
+            print(errorMessage)
+            return {"ERROR": errorMessage}
 
         queryImageData = base64.b64decode(gppRequest.sensorReadings.cameraReadings[0].imageBytes)
 
@@ -186,12 +193,16 @@ async def localize(request: Request, response: Response):
         queryImage = cv2.imdecode(queryImageBuffer, cv2.IMREAD_COLOR_BGR)
         if queryImage is None:
             response.status_code = status.HTTP_400_BAD_REQUEST
-            return {"ERROR":"Could not decode image"}
+            errorMessage = "Could not decode image"
+            print(errorMessage)
+            return {"ERROR": errorMessage}
 
         # Get and decode the camera parameters
         if gppRequest.sensorReadings.cameraReadings[0].params is None:
             response.status_code = status.HTTP_400_BAD_REQUEST
-            return {"ERROR":"Request has no camera parameters"}
+            errorMessage = "Request has no camera parameters"
+            print(errorMessage)
+            return {"ERROR": errorMessage}
 
         cameraParameters = gppRequest.sensorReadings.cameraReadings[0].params
         # NOTE: if the image gets resized, we need to resize the camera parameters too
@@ -203,6 +214,12 @@ async def localize(request: Request, response: Response):
             print(gppRequest.toJson())
 
         global currentMapId
+        if currentMapId ==kDummyMapId:
+            errorMessage = "No map is loaded. Load a map with /load_map/{id} first."
+            print(errorMessage)
+            response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+            return {"ERROR": errorMessage}
+
         if not currentMapId in localizers:
             raise RuntimeError(f"Could not find localizer with id {currentMapId}")
         localizer = localizers[currentMapId]
@@ -213,9 +230,10 @@ async def localize(request: Request, response: Response):
         if get_settings().debug:
             print(f"Elapsed time: {t_end - t_start} ms")
         if estimatedGeoPose is None:
-            response.status_code = status.HTTP_501_NOT_IMPLEMENTED
-            print(f"Could not localize request {gppRequest.id}")
-            return {"ERROR":f"Could not localize request {gppRequest.id}"}
+            errorMessage = "Could not localize request {gppRequest.id}"
+            print(errorMessage)
+            response.status_code = status.HTTP_404_NOT_FOUND
+            return {"ERROR": errorMessage}
 
         gppResponse = GeoPoseResponse()
         gppResponse.id = gppRequest.id
@@ -231,6 +249,6 @@ async def localize(request: Request, response: Response):
         response.status_code = status.HTTP_200_OK
         return gppResponse
 
-    except:
+    except Exception as e:
         response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
-        return {"ERROR":"Internal server error"}
+        return {"ERROR":"Internal server error: " + str(e)}

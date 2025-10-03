@@ -75,6 +75,10 @@ RUN --mount=type=cache,target=/root/.cache/pip python3 -m pip install --upgrade 
 COPY --from=hloc_context . /app/hloc
 RUN --mount=type=cache,target=/root/.cache/pip python3 -m pip install --no-build-isolation --verbose -e /app/hloc
 
+# Replace PyTorch with an earlier version if your GPU is not supported by the newest version
+#RUN pip uninstall torch -y
+#RUN pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1
+
 # Install scripts
 COPY --from=scripts_context . /app/scripts
 

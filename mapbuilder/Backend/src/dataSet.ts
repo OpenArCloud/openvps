@@ -80,12 +80,7 @@ export class DataSet {
 
     private hlocMapManager: HlocMapManager;
 
-    constructor(
-        private state: DataSetStatus,
-        private uploadLocation: UploadLocation,
-        private readonly io: Server,
-        private config: EnvironmentalConfig,
-    ) {
+    constructor(private state: DataSetStatus, private uploadLocation: UploadLocation, private readonly io: Server, private config: EnvironmentalConfig) {
         this.mapStatusPublisher = new GenericStatusPublisher<DataSetStatus>(this.io, uploadLocation.getStatusFilePath(), this.state.metadata);
 
         this.hlocMapManager = new HlocMapManager(uploadLocation, this.hlocStatusUpdate, config);
@@ -173,5 +168,9 @@ export class DataSet {
 
     public getHlocSparsePlyDownloadLink(mapId: string) {
         return this.hlocMapManager.getSparsePlyDownloadLink(mapId);
+    }
+
+    public getHlocZipDownloadLink(mapId: string) {
+        return this.hlocMapManager.getAllMapDataDownloadLink(mapId);
     }
 }

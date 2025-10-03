@@ -39,7 +39,7 @@ services:
     deploy:
       # https://docs.docker.com/reference/compose-file/deploy/
       restart_policy:
-        condition: on-failure
+        condition: unless-stopped
       resources:
         reservations:
           devices:
@@ -72,6 +72,9 @@ services:
       - NEXT_PUBLIC_DEFAULT_LATITUDE=${DEFAULT_LATITUDE}
       - NEXT_PUBLIC_DEFAULT_HEIGHT=${DEFAULT_HEIGHT}
       - NODE_TLS_REJECT_UNAUTHORIZED=0
+    deploy:
+      restart_policy:
+        condition: unless-stopped
     ports:
       - ${MAPALIGNER_PORT}:3001
 
@@ -92,7 +95,7 @@ services:
     deploy:
       # https://docs.docker.com/reference/compose-file/deploy/
       restart_policy:
-        condition: on-failure
+        condition: unless-stopped
       resources:
         reservations:
           devices:
@@ -115,6 +118,9 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    deploy:
+      restart_policy:
+        condition: unless-stopped
     ports:
       - ${MAPBUILDER_PORT}:80
       - ${MAPBUILDER_PORT_HTTPS}:443

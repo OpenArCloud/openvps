@@ -28,7 +28,8 @@
 
     $: processingState = $processingStore.value.find((state) => state.metadata.id === id);
     $: if (processingState) {
-        const extractStage = processingState.stages.get("extract");
+        // TODO: stop repeating strings of task names scattered in the code, use Enums or search for a given task type
+        const extractStage = processingState.stages.get("datasetExtract");
         const isExtractCompleted = extractStage?.status === TaskStatus.completed;
         enableHlocStartProcessing = false;
         enableHlocDownloadMap = false;
@@ -151,7 +152,46 @@
     };
 
     const onHlocDownloadMap = () => {
-        let downloadUrl = API_URLS.HLOC_DOWNLOAD_MAP.replace(":id", id);
+        let downloadUrl = API_URLS.HLOC_DOWNLOAD_MAP.replace(":id", id) + "?type=ply";
+        const mapId = getFirstHlocMapId();
+
+        downloadUrl = downloadUrl.replace(":mapId", mapId);
+        const headers = new Headers();
+        if (AUTH_ENABLED) {
+            headers.set("Authorization", `Bearer ${getAuthenticationToken()}`);
+        }
+
+        fetch(downloadUrl, {
+            method: "GET",
+            headers: headers,
+        })
+            .then(async (response) => {
+                const filenameHeader = response.headers
+                    .get("Content-Disposition")
+                    ?.split("filename=")[1];
+                const filename = filenameHeader?.replaceAll(/['"]+/g, "");
+                return { blob: await response.blob(), filename };
+            })
+            .then(({ blob, filename }) => {
+                if (!blob || !filename) {
+                    console.error("No file received");
+                    return;
+                }
+                let url = window.URL.createObjectURL(blob);
+                let a = document.createElement("a");
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+            })
+            .catch((err) => {
+                console.error(err);
+            });
+    };
+
+    const onHlocDownloadZip = () => {
+        let downloadUrl = API_URLS.HLOC_DOWNLOAD_MAP.replace(":id", id) + "?type=zip";
         const mapId = getFirstHlocMapId();
 
         downloadUrl = downloadUrl.replace(":mapId", mapId);
@@ -333,6 +373,20 @@
                 </Button>
             </Tooltip.Trigger>
             <Tooltip.Content>Download Last HLOC Map</Tooltip.Content>
+        </Tooltip.Root>
+
+        <Tooltip.Root>
+            <Tooltip.Trigger>
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    class="relative h-8 w-8 p-0"
+                    on:click={onHlocDownloadZip}
+                >
+                    <DownloadSvg />
+                </Button>
+            </Tooltip.Trigger>
+            <Tooltip.Content>Download Last HLOC Pack</Tooltip.Content>
         </Tooltip.Root>
 
         <Tooltip.Root>

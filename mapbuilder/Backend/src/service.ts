@@ -147,11 +147,11 @@ export function startRestService(statuses: DataSetStatus[], config: Environmenta
     app.get("/maps/selected", protectedRoute, async (req: Request, res: Response) => {
         const MAPLOCALIZER_URL = process.env.MAPLOCALIZER_URL;
         let selectQuery, selectResponse;
-        try{
+        try {
             selectQuery = await fetch(`${MAPLOCALIZER_URL}/current_map_id`);
             selectResponse = await selectQuery.json();
-        }catch(error){
-            console.error("Could not connect to MapLocalizer. Is it running?")
+        } catch (error) {
+            console.error("Could not connect to MapLocalizer. Is it running?");
             console.error(error);
             res.status(500).send("Could not connect to MapLocalizer. Is it running?");
             return;
@@ -251,20 +251,21 @@ export function startRestService(statuses: DataSetStatus[], config: Environmenta
             return;
         }
 
-        try{
+        try {
             const selectQuery = await fetch(`${MAPLOCALIZER_URL}/load_map/${mapId}`, {
-                signal: AbortSignal.timeout(3000)
+                signal: AbortSignal.timeout(3000),
             });
-            if(!selectQuery.ok){
+            if (!selectQuery.ok) {
                 const selectResponse = await selectQuery.json();
+                console.log(selectResponse);
                 res.status(500).send(selectResponse.ERROR);
-            }else{
+            } else {
                 res.status(200).send("OK");
             }
-        }catch(error){
-            if(error.name === "TimeoutError"){
+        } catch (error) {
+            if (error.name === "TimeoutError") {
                 res.status(200).send("Loading localization map.\nThis may take several minutes, please wait.");
-            }else{
+            } else {
                 res.status(500).send(error.toString());
                 console.error(error);
             }
@@ -309,8 +310,15 @@ export function startRestService(statuses: DataSetStatus[], config: Environmenta
     app.get("/maps/:id/hloc/:mapId/download", protectedRoute, (req: Request, res: Response) => {
         const datasetId = req.params.id;
         const mapId = req.params.mapId;
-        const file = taskManager.getHlocSparsePlyDownloadLink(datasetId, mapId);
-        const filename = mapId + ".ply";
+        let file, filename;
+        if (req.query.type === "zip") {
+            file = taskManager.getHlocZipDownloadLink(datasetId, mapId);
+            filename = mapId + ".zip";
+        } else {
+            file = taskManager.getHlocSparsePlyDownloadLink(datasetId, mapId);
+            filename = mapId + ".ply";
+        }
+
         if (file) {
             console.log("[hloc] Downloading", file);
             res.download(file, filename, function (error) {

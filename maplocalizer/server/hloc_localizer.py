@@ -117,8 +117,22 @@ class HlocLocalizer():
     def load_map(self, config):
         self.config = config
 
+        print(f"Pytorch version: {torch.__version__}")
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        print(f"Device: {self.device}")
+        print(f"Using device: {self.device}")
+        if self.device == 'cuda':
+            print(f"CUDA supported architectures: {torch.cuda.get_arch_list()}")
+            print(f"Device count: {torch.cuda.device_count()}")
+            print(f"Current device index: {torch.cuda.current_device()}")
+            print(f"Current device name: {torch.cuda.get_device_name(torch.cuda.current_device())}")
+            props = torch.cuda.get_device_properties(torch.cuda.current_device())
+            print(f"Devide properties: {props}")
+            print(f"  Compute Capability: {props.major}.{props.minor}")
+            print(f"  Total Memory: {props.total_memory / 1024**3:.2f} GB")
+            print(f"Memory Usage:")
+            print(f"Allocated: {round(torch.cuda.memory_allocated(0)/1024**3,1)} GB")
+            print(f"Cached:    {round(torch.cuda.memory_reserved(0)/1024**3,1)} GB")
+
 
         self.feature_conf = extract_features.confs[config['feature_conf']]
         print(f"Feature conf: {self.feature_conf}")

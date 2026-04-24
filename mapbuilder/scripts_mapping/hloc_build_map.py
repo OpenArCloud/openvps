@@ -37,11 +37,15 @@ import os
 import yaml # conda install -c conda-forge pyyaml
 import argparse
 from pathlib import Path
+import datetime
 
 from hloc import extract_features, match_features
 from hloc import pairs_from_exhaustive, pairs_from_retrieval, pairs_from_poses
 from hloc import reconstruction
 from pycolmap import CameraMode
+from test_gpu import getGpuInfo
+
+import torch # only for printing the version and features
 
 def read_yaml(file_path):
     with open(file_path, "r") as f:
@@ -57,6 +61,25 @@ def program_includes(step):
 
 def hloc_build_map(config):
     try:
+        print(f"# {datetime.datetime.now()} Building new HLoc map")
+        print("Checking GPU availability...")
+        print(getGpuInfo())
+        print(f"Pytorch version: {torch.__version__}")
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        print(f"Using device: {device}")
+        if device.type == 'cuda':
+            print(f"CUDA supported architectures: {torch.cuda.get_arch_list()}")
+            print(f"Device count: {torch.cuda.device_count()}")
+            print(f"Current device index: {torch.cuda.current_device()}")
+            print(f"Current device name: {torch.cuda.get_device_name(torch.cuda.current_device())}")
+            props = torch.cuda.get_device_properties(torch.cuda.current_device())
+            print(f"Devide properties: {props}")
+            print(f"  Compute Capability: {props.major}.{props.minor}")
+            print(f"  Total Memory: {props.total_memory / 1024**3:.2f} GB")
+            print(f"Memory Usage:")
+            print(f"Allocated: {round(torch.cuda.memory_allocated(0)/1024**3,1)} GB")
+            print(f"Cached:    {round(torch.cuda.memory_reserved(0)/1024**3,1)} GB")
+
         outputs = Path(config['hloc_reconstruction']['reconstruction_path'])
         features_path = outputs / 'features.h5'
         global_features_path = outputs / 'global_features.h5'

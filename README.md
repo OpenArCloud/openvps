@@ -71,7 +71,9 @@ Clone HLOC:
 cd $HOME/dev/openvps
 git clone https://github.com/cvg/Hierarchical-Localization.git
 cd Hierarchical-Localization
-git checkout abb252080282e31147db6291206ca102c43353f7
+git checkout abb2520 # 2024-11-03, compatible with pycolmap<=3.11
+git checkout 2e2a551 # 2025-07-22, compatible with pycolmap>=3.12,<4.0
+git checkout c13273b # 2025-12-10, compatible with pycolmap==3.13,<4.0
 git submodule update --init --recursive
 ```
 
@@ -160,6 +162,11 @@ Stop services:
 docker compose --env-file docker.env --progress=plain down
 ```
 
+Run a single container for testing:
+```sh
+docker run --rm -it --gpus all openvps-backend:latest /bin/bash
+```
+
 ## Usage
 
 ### Recording
@@ -183,7 +190,6 @@ You can find example clients in Open AR Cloud repositores based on a WebXR clien
 The camera intrinsics are also required in the queries. If you send queries via spARcl, it submits the camera intrinsics automatically. If you use other clients, you need to find out somehow the intrinsics. The stock Android Photo app writes them into the EXIF metadata of the photos, you can read those out. You can also use images from StrayScanner recordings as queries (same sequence as for mapping or other recording, does not matter), because StrayScanner also saves the intrinsics. The Cesium client reads the intrinsics from the EXIF. The C++ and Python clients take the intrinsics from a JSON file that the user needs to write before the query.
 
 
-
 ## Troubleshooting
 
 ### ERROR: Unexpected bus error encountered in worker. This might be caused by insufficient shared memory (shm)
@@ -201,12 +207,24 @@ The identity provider cannot be reached due to either a connection issue or the 
 ### FusionAuth login error
 We found that the FusionAuth container sometimes dies and this results in a misconfiguration error message on the login screen. In this occurs, restart the FusionAuth container.
 
-### CUDA/pytorch incompatibility error: 
+### Docker image and GPU driver incompatibility
+nvidia CUDA Docker images: https://gitlab.com/nvidia/container-images/cuda/-/blob/master/doc/supported-tags.md?ref_type=heads
+
+### Pytorch and GPU driver version incompatibility
 Minimum and Maximum CUDA capability supported by Pytorch depends on the version. If your GPU is older, you may need to downgrade the `torch` package that HLOC installs automatically. There is a commented section in the MapBuilder and MapLocalizer Dockerfiles for that.
+
+If you see PyTorch UserWarning: CUDA initialization: The NVIDIA driver on your system is too old (found version xxxx)...
+Replace PyTorch with an earlier version if your GPU is not supported by the newest version by adding these two lines to the Dockerfile of mapbuilder-backend and maplocalizer:
+```
+RUN pip uninstall torch -y
+RUN pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1
+```
+
+When updating the host GPU drivers, there might be need to update the nvidia/cuda base images too. This command ensures to download the latest image and check the GPU compatibility: `docker run --rm --gpus all nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04 nvidia-smi` (or whichever base container is used in the subproject Dockerfiles). If the base image gets updated, you also need to rebuild the OpenVPS images.
 
 
 ## Known issues and feature ideas:
- - map height is not altitude but above ground
- - only one map can be active at a time (enough for educational purposes)
+ - The map height is not real altitude but above ground
+ - Only one map can be active at a time (sufficient for educational purposes)
  - MapBuilder should have datasets and maps separated from each other, because from one dataset we could create multiple maps by using different HLOC methods and/or parameters.
  - Support for selecting various HLOC configs on the frontend

@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 
 import time
+import datetime
 from oscp.geoposeprotocol import GeoPoseRequest, GeoPoseResponse, verify_version_header
 import base64
 
@@ -19,6 +20,8 @@ import cv2
 
 from hloc_localizer import HlocLocalizer
 from dummy_localizer import DummyLocalizer
+
+from test_gpu import getGpuInfo
 
 import env
 from functools import lru_cache
@@ -51,16 +54,23 @@ currentMapId = kDummyMapId
 # print the env file
 print(get_settings())
 
+# print the GPU details
+print("Checking GPU availability...")
+print(getGpuInfo())
+
 
 @app.get("/")
 def read_root():
     return {"STATUS":"OpenVPS MapLocalizer is running. Use the /localize/geopose endpoint"}
 
+@app.get("/gpu_info")
+def gpu_info():
+    return getGpuInfo()
 
 # TODO: change to POST. We have it as GET for now so that it can be triggered simply from a browser
 @app.get('/load_map/{id}')
 async def load_map(id:str, response: Response):
-    print("Loading map: " + str(id))
+    print(f"# {datetime.datetime.now()} Loading map: {str(id)}")
     # NOTE: in the future, we can check whether this ID belongs to an HLoc map or other type of map, and load accordingly
 
     # check whether map with this id exists
@@ -142,19 +152,19 @@ async def localize():
 
 
 @app.get("/root_path")
-def read_main(request: Request):
+def root_path(request: Request):
     return {"root_path": request.scope.get("root_path")}
 
 
 @app.get("/current_map_id")
-def read_main():
+def current_map_id():
     return {"id": currentMapId}
 
 
 @app.post('/localize/geopose')
 async def localize(request: Request, response: Response):
     try:
-
+        print(f"# {datetime.datetime.now()} localize")
         # First verify the protocol version from the Accept header
         success, versionMajor, versionMinor = verify_version_header(request.headers)
         if not success:

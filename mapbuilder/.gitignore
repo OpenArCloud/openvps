@@ -24,3 +24,5 @@ dist-ssr
 *.sw?
 
 /Hierarchical-Localization
+*__pycache__/
+*.pyc

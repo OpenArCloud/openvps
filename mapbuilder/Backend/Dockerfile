@@ -76,8 +76,13 @@ COPY --from=hloc_context . /app/hloc
 RUN --mount=type=cache,target=/root/.cache/pip python3 -m pip install --no-build-isolation --verbose -e /app/hloc
 
 # Replace PyTorch with an earlier version if your GPU is not supported by the newest version
-#RUN pip uninstall torch -y
-#RUN pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1
+# If you see PyTorch UserWarning: CUDA initialization: The NVIDIA driver on your system is too old (found version xxxx). 
+# Please update your GPU driver ... Alternatively, ... install a PyTorch version that has been compiled with your version of the CUDA driver.
+RUN pip uninstall torch -y
+RUN pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1
+
+# Replace pycolmap with an earlier version (see main README.md) that is compatible with the HLOC commit version
+RUN pip install pycolmap==3.13
 
 # Install scripts
 COPY --from=scripts_context . /app/scripts

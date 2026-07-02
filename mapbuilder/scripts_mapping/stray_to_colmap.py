@@ -22,16 +22,35 @@ kReadWriteModelScriptPath = os.path.dirname(os.path.abspath(__file__)) + "/" + "
 
 def read_stray_data(scene):
     intrinsics = np.loadtxt(os.path.join(scene, 'camera_matrix.csv'), delimiter=',')
-    odometry = np.loadtxt(os.path.join(scene, 'odometry.csv'), delimiter=',', skiprows=1)
     imu = np.loadtxt(os.path.join(scene, 'imu.csv'), delimiter=',', skiprows=1)
     poses = []
-    for line in odometry:
-        # timestamp, frame, x, y, z, qx, qy, qz, qw
 
+    odometry = []
+    # Older format before StrayScanner v1.4:
+    # timestamp, frame, x, y, z, qx, qy, qz, qw
+    # New format since StrayScanner v1.4:
+    # timestamp, frame, x, y, z, qx, qy, qz, qw, fx, fy, cx, cy, distortion_center_x, distortion_center_y
+    # See https://github.com/strayrobots/scanner/releases/tag/v1.4 (2026-04-04)
+    # Read the first line of the odometry file to detect the format and parse accordingly.
+    with open(os.path.join(scene, 'odometry.csv'), 'r') as f:
+        first_line = f.readline()
+    if (first_line.count(',') == 8):
+        print("Detected older odometry format (timestamp, frame, x, y, z, qx, qy, qz, qw)")
+        odometry = np.loadtxt(os.path.join(scene, 'odometry.csv'), delimiter=',', skiprows=1)
+    elif (first_line.count(',') == 14):
+        print("Detected newer odometry format (timestamp, frame, x, y, z, qx, qy, qz, qw, fx, fy, cx, cy, distortion_center_x, distortion_center_y)")
+        # We noticed the some values (distortion_center_x, distortion_center_y) are missing from the odometry file,
+        # which leads to ValueError: could not convert string ' ' to float64 at row 0, column 14.
+        # To fix this, we can use the np.genfromtxt function instead of np.loadtxt, which can handle missing values.
+        # We will fill the missing values with NaN.
+        odometry = np.genfromtxt(os.path.join(scene, 'odometry.csv'), delimiter=',', skip_header=1, filling_values=np.nan)
+
+    # Get the poses of the frames from the odometry
+    for line in odometry:
         #timestamp = line[0]
         #frame_id = int(line[1])
-        position = line[2:5]
-        quaternion = line[5:]
+        position = line[2:5] # in the order of x, y, z
+        quaternion = line[5:9] # in the order of qx, qy, qz, qw
         T_WC = np.eye(4)
         T_WC[:3, :3] = Rotation.from_quat(quaternion).as_matrix()
         T_WC[:3, 3] = position

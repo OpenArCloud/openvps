@@ -12,17 +12,21 @@
 
 from datetime import datetime, timezone
 from enum import Enum
-import uuid
-import json
-from oscp.geopose import *
 import sys
 import re
+import uuid
+import json
+from typing import Any, List, Optional
+from oscp.geopose import *
 
-'''
-Sensor types usable with the GeoPose protocol
-Use when creating a new Sensor object.
-'''
+
+def _timestamp_ms_from_json(value: Any) -> int:
+    """Normalize JSON number (int/float from e.g. JavaScript) to Unix epoch milliseconds as int."""
+    return int(round(float(value)))
+
+
 class SensorType(str, Enum):
+    """Sensor types usable with the GeoPose protocol; use when creating a new Sensor object."""
     CAMERA = 'camera'
     GEOLOCATION = 'geolocation'
     WIFI = 'wifi'
@@ -54,11 +58,9 @@ class SensorType(str, Enum):
         else:
             raise NotImplementedError
 
-'''
-Image formats usable with the CameraReading object
-Use when creating a SensorReading object for a new Sensor of type 'camera'.
-'''
+
 class ImageFormat(str, Enum):
+    """Image formats for CameraReading; use for SensorReading on camera sensors."""
     RGBA32 = 'RGBA32'
     GRAY8 = 'GRAY8'
     DEPTH = 'DEPTH'
@@ -81,6 +83,7 @@ class ImageFormat(str, Enum):
             raise NotImplementedError
 
 class ImageOrientation(object):
+    """Image orientation for CameraReading; use for SensorReading on camera sensors."""
     def __init__(self, mirrored = False, rotation = 0.0):
         self.mirrored = mirrored
         self.rotation = rotation
@@ -98,6 +101,7 @@ class ImageOrientation(object):
 # The camera models of Colmap are used here
 # See https://colmap.github.io/cameras.html
 class CameraModel(str, Enum):
+    """Camera models for CameraReading; use for SensorReading on camera sensors."""
     SIMPLE_PINHOLE = 'SIMPLE_PINHOLE' # f, cx, cy
     PINHOLE = 'PINHOLE' # fx, fy, cx, cy
     SIMPLE_RADIAL = 'SIMPLE_RADIAL' # f, cx, cy, k
@@ -141,6 +145,7 @@ class CameraModel(str, Enum):
             raise NotImplementedError
 
 class CameraParameters(object):
+    """Camera parameters for CameraReading; use for SensorReading on camera sensors."""
     def __init__(self, model = CameraModel.UNKNOWN, modelParams = None, minMaxDepth = None, minMaxDisparity = None):
         self.model = model # [optional] // TODO: string in the v1 standard, but enum is better suited here
         if modelParams is None:
@@ -178,6 +183,7 @@ class CameraParameters(object):
         return cameraParameters
 
 class Privacy(object):
+    """Privacy settings for SensorReading; use for SensorReading on all sensors."""
     def __init__(self, dataRetention = None, dataAcceptableUse = None, dataSanitizationApplied = None, dataSanitizationRequested = None):
         if dataRetention is None:
             self.dataRetention = []
@@ -212,6 +218,7 @@ class Privacy(object):
                        dataSanitizationRequested=jdata["dataSanitizationRequested"])
 
 class CameraReading(object):
+    """Camera reading; use for SensorReading on camera sensors."""
     def __init__(self, timestamp = 0, sensorId = "", privacy = Privacy(),
                 sequenceNumber = 0, imageFormat = ImageFormat.UNKNOWN, size = [0,0], imageBytes = [],
                 imageOrientation = ImageOrientation(), params = CameraParameters()):
@@ -257,6 +264,7 @@ class CameraReading(object):
                              params=params)
 
 class GeolocationReading(object):
+    """Geolocation reading; use for SensorReading on geolocation sensors."""
     # aligns with https://w3c.github.io/geolocation-sensor/
     def __init__(self, timestamp = 0, sensorId = "", privacy = Privacy(),
                  latitude = 0.0, longitude = 0.0, altitude = 0.0, accuracy = 0.0, altitudeAccuracy = 0.0, heading = 0.0, speed = 0.0):
@@ -294,6 +302,7 @@ class GeolocationReading(object):
                                   heading=jdata["heading"], speed=jdata["speed"])
 
 class WiFiReading(object):
+    """WiFi reading; use for SensorReading on WiFi sensors."""
     def __init__(self, timestamp = 0, sensorId = "", privacy = Privacy(),
                  BSSID = "", frequency = 0.0, RSSI = 0.0, SSID = "", scanTimeStart = 0, scanTimeEnd = 0):
         self.timestamp = timestamp # The number of milliseconds* since the Unix Epoch.
@@ -327,6 +336,7 @@ class WiFiReading(object):
                            SSID=jdata["SSID"], scanTimeStart=jdata["scanTimeStart"], scanTimeEnd=jdata["scanTimeEnd"])
 
 class BluetoothReading(object):
+    """Bluetooth reading; use for SensorReading on Bluetooth sensors."""
     def __init__(self, timestamp = 0, sensorId = "", privacy = Privacy(),
                  address = "", RSSI = 0.0, name = ""):
         self.timestamp = timestamp # The number of milliseconds* since the Unix Epoch.
@@ -353,6 +363,7 @@ class BluetoothReading(object):
                                 address=jdata["address"], RSSI=jdata["RSSI"], name=jdata["name"])
 
 class AccelerometerReading(object):
+    """Accelerometer reading; use for SensorReading on accelerometer sensors."""
     def __init__(self, timestamp = 0, sensorId = "", privacy = Privacy(),
                  x = 0.0, y = 0.0, z = 0.0):
         self.timestamp = timestamp # The number of milliseconds* since the Unix Epoch.
@@ -379,6 +390,7 @@ class AccelerometerReading(object):
                                     x=jdata["x"], y=jdata["y"], z=jdata["z"])
 
 class GyroscopeReading(object):
+    """Gyroscope reading; use for SensorReading on gyroscope sensors."""
     def __init__(self, timestamp = 0, sensorId = "", privacy = Privacy(),
                  x = 0.0, y = 0.0, z = 0.0):
         self.timestamp = timestamp # The number of milliseconds* since the Unix Epoch.
@@ -405,6 +417,7 @@ class GyroscopeReading(object):
                                 x=jdata["x"], y=jdata["y"], z=jdata["z"])
 
 class MagnetometerReading(object):
+    """Magnetometer reading; use for SensorReading on magnetometer sensors."""
     def __init__(self, timestamp = 0, sensorId = "", privacy = Privacy(),
                  x = 0.0, y = 0.0, z = 0.0):
         self.timestamp = timestamp # The number of milliseconds* since the Unix Epoch.
@@ -431,6 +444,7 @@ class MagnetometerReading(object):
                                    x=jdata["x"], y=jdata["y"], z=jdata["z"])
 
 class Sensor(object):
+    """One sensor in the GeoPoseRequest ``sensors`` list (metadata and rig extrinsics)."""
     def __init__(self, type:SensorType = SensorType.UNKNOWN, id:str = "", name:str = "", model:str = "",
                  rigIdentifier = "", rigRotation = Quaternion(), rigTranslation = Vector3()):
         self.type = type # camera, geolocation, wifi, bluetooth, accelerometer, gyroscope, magnetometer
@@ -456,7 +470,7 @@ class Sensor(object):
     def fromJson(jdata):
         sensor = Sensor(type=SensorType.fromJson(jdata["type"]), id=jdata["id"])
         if "name" in jdata:
-            sensor.name=jdata["name"],
+            sensor.name = jdata["name"]
         if "model" in jdata:
             sensor.model=jdata["model"]
         if "rigIdentifier" in jdata:
@@ -468,6 +482,7 @@ class Sensor(object):
         return sensor
 
 class SensorReadings(object):
+    """Sensor readings in GeoPoseRequest"""
     def __init__(self, cameraReadings:[CameraReading] = None, geolocationReadings:[GeolocationReading] = None,
                  accelerometerReadings:[AccelerometerReading] = None, gyroscopeReadings:[GyroscopeReading] = None,
                  magnetometerReadings:[MagnetometerReading] = None, wifiReadings:[WiFiReading] = None,
@@ -539,6 +554,7 @@ class SensorReadings(object):
         return sensorReadings
 
 class GeoPoseAccuracy(object):
+    """GeoPose accuracy in GeoPoseResponse"""
     def __init__(self, position = sys.float_info.max, orientation = sys.float_info.max):
         self.position = position # mean for all components in meters
         self.orientation = orientation # mean for all 3 angles in degrees
@@ -554,12 +570,30 @@ class GeoPoseAccuracy(object):
         return GeoPoseAccuracy(**jdata)
 
 class GeoPoseResponse(object):
-    def __init__(self, type:str = "geopose", id:str = str(uuid.uuid4()), timestamp = datetime.now(timezone.utc).timestamp()*1000,
-                accuracy:GeoPoseAccuracy = GeoPoseAccuracy(), geopose:GeoPose = GeoPose()):
-        self.type = type # ex. geopose
+    """OSCP GeoPoseProtocol response"""
+    def __init__(self,
+        type:str = None,
+        id:str = None,
+        timestamp:int = None,
+        accuracy:GeoPoseAccuracy = None,
+        geopose:GeoPose = None
+    ):
+        if type is None:
+            type = "geopose"
+        self.type = type
+        if id is None:
+            id = str(uuid.uuid4())
         self.id = id
-        self.timestamp = timestamp # The number of milliseconds since the Unix Epoch.
+        if timestamp is None:
+            timestamp = int(datetime.now(timezone.utc).timestamp() * 1000) # The number of milliseconds since the Unix Epoch.
+        else:
+            timestamp = int(round(float(timestamp)))
+        self.timestamp = timestamp
+        if accuracy is None:
+            accuracy = GeoPoseAccuracy()
         self.accuracy = accuracy
+        if geopose is None:
+            geopose = GeoPose()
         self.geopose = geopose
 
     def __str__(self):
@@ -578,11 +612,34 @@ class GeoPoseResponse(object):
     def fromJson(jdata):
         accuracy = GeoPoseAccuracy.fromJson(jdata["accuracy"])
         geopose = GeoPose.fromJson(jdata["geopose"])
-        return GeoPoseResponse(type=jdata["type"], id=jdata["id"], timestamp=jdata["timestamp"], accuracy=accuracy, geopose=geopose)
+        return GeoPoseResponse(
+            type=jdata["type"],
+            id=jdata["id"],
+            timestamp=_timestamp_ms_from_json(jdata["timestamp"]),
+            accuracy=accuracy,
+            geopose=geopose,
+        )
+
 
 class GeoPoseRequest(object):
-    def __init__(self, type:str = "geopose", id:str = str(uuid.uuid4()), timestamp = datetime.now(timezone.utc).timestamp()*1000,
-                 sensors:[Sensor] = None, sensorReadings:SensorReadings = None, priorPoses:[GeoPoseResponse] = None):
+    """OSCP GeoPoseProtocol request"""
+    def __init__(
+        self,
+        type:str=None,
+        id:str=None,
+        timestamp:int=None,
+        sensors:[Sensor]=None,
+        sensorReadings:SensorReadings=None,
+        priorPoses:Optional[List[GeoPoseResponse]]=None,
+    ):
+        if type is None:
+            type = "geopose"
+        if id is None:
+            id = str(uuid.uuid4())
+        if timestamp is None:
+            timestamp = int(datetime.now(timezone.utc).timestamp() * 1000) # The number of milliseconds since the Unix Epoch.
+        else:
+            timestamp = int(round(float(timestamp)))
         self.type = type # ex. geopose
         self.id = id
         self.timestamp = timestamp # The number of milliseconds since the Unix Epoch.
@@ -597,7 +654,7 @@ class GeoPoseRequest(object):
         if priorPoses is None:
             self.priorPoses = []
         else:
-            self.priorPoses = priorPoses # [optional] # TODO: are these of type GeoPose or GeoPoseResponse?
+            self.priorPoses = priorPoses # [optional] of type GeoPoseResponse
 
     def __str__(self):
         return "{" + \
@@ -622,40 +679,48 @@ class GeoPoseRequest(object):
         if "priorPoses" in jdata:
             for jpriorPose in jdata["priorPoses"]:
                 priorPoses.append(GeoPoseResponse.fromJson(jpriorPose))
-        else:
-            priorPoses = []
-        return GeoPoseRequest(type=jdata["type"], id=jdata["id"], timestamp=jdata["timestamp"],
-                              sensors=sensors, sensorReadings=sensorReadings, priorPoses=priorPoses)
+        return GeoPoseRequest(
+            type=jdata["type"],
+            id=jdata["id"],
+            timestamp=_timestamp_ms_from_json(jdata["timestamp"]),
+            sensors=sensors,
+            sensorReadings=sensorReadings,
+            priorPoses=priorPoses,
+        )
+
 
 def parse_accept_type(accept_header:str):
+    """Parse the type header of the request"""
     TYPE_REGEX = re.compile(
         r'application/vnd\.oscp\+json'# OSCP JSON
     )
-    type = TYPE_REGEX.search(accept_header)
-    if type == None:
+    match = TYPE_REGEX.search(accept_header)
+    if match is None:
         return False
     return True
 
 def parse_accept_version(accept_header:str):
+    """Parse the version header of the request"""
     VERSION_REGEX = re.compile(
         r'version='                 # version=
         r'(?P<major>[0-9]+)'        # capture major number
         r'(?:.(?P<minor>[0-9]+))?'  # capture minor number if exists
     )
     version = VERSION_REGEX.search(accept_header)
-    if version == None:
+    if version is None:
         return False, None, None
 
     majorStr = version.groupdict()['major']
     minorStr = version.groupdict()['minor']
     try:
         major = int(majorStr)
-        minor = None if minorStr == None else int(minorStr)
-    except:
+        minor = None if minorStr is None else int(minorStr)
+    except (TypeError, ValueError):
         return False, None, None
     return True, major, minor
 
 def verify_version_header(headers):
+    """Verify the version header of the request"""
     if headers.get('Accept') is None:
         return False, None, None
 

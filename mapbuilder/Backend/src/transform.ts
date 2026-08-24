@@ -5,22 +5,25 @@
  */
 
 // TODO: remove this file and move everything to tasks and datasets
-// TODO: rename this GeoPose because it is different than the OGC GeoPose and this is confusing
 
 import * as fs from "node:fs";
 import {EnvironmentalConfig} from "./index";
 
-export interface GeoPose {
-    latitude: number;
-    longitude: number;
-    height: number;
+/**
+ * Map / world alignment in ``hlocMaps/<mapId>/transform.json`` (not OGC GeoPose).
+ * Use ``null`` geodetic fields when the map has no global geo anchor (scale / ENU frame only).
+ */
+export interface WorldAlignmentInfo {
+    latitude?: number | null;
+    longitude?: number | null;
+    height?: number | null;
     matrix: number[][];
 }
 
-const DEFAULT_TRANSFORM: GeoPose = {
-    longitude: parseFloat(process.env.DEFAULT_LONGITUDE!),
-    latitude: parseFloat(process.env.DEFAULT_LATITUDE!),
-    height: parseFloat(process.env.DEFAULT_HEIGHT!),
+const kDefaultWorldAlignmentInfo: WorldAlignmentInfo = {
+    longitude: null,
+    latitude: null,
+    height: null,
     matrix: [
         [1, 0, 0, 0],
         [0, 1, 0, 0],
@@ -29,23 +32,51 @@ const DEFAULT_TRANSFORM: GeoPose = {
     ],
 };
 
-export function saveHlocTransform(dataSetId: string, mapId: string, geoPose: GeoPose, config: EnvironmentalConfig) {
-    const mapPath = `${config.uploadsDir}/${dataSetId}/hlocMaps/${mapId}/transform.json`;
-    fs.writeFileSync(mapPath, JSON.stringify(geoPose, null, 2));
+function numOrNull(v: unknown): number | null {
+    if (v === null || v === undefined) {
+        return null;
+    }
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
 }
 
-export function readHlocTransform(dataSetId: string, mapId: string, config: EnvironmentalConfig): GeoPose {
+export function saveHlocTransform(
+    dataSetId: string,
+    mapId: string,
+    body: Partial<WorldAlignmentInfo> & {matrix: number[][]},
+    config: EnvironmentalConfig,
+) {
+    const mapPath = `${config.uploadsDir}/${dataSetId}/hlocMaps/${mapId}/transform.json`;
+    const payload: WorldAlignmentInfo = {
+        latitude: numOrNull(body.latitude),
+        longitude: numOrNull(body.longitude),
+        height: numOrNull(body.height),
+        matrix: body.matrix,
+    };
+    fs.writeFileSync(mapPath, JSON.stringify(payload, null, 2));
+}
+
+export function readHlocTransform(
+    dataSetId: string,
+    mapId: string,
+    config: EnvironmentalConfig,
+): WorldAlignmentInfo {
     const mapPath = `${config.uploadsDir}/${dataSetId}/hlocMaps/${mapId}/transform.json`;
 
     if (!fs.existsSync(mapPath)) {
-        return DEFAULT_TRANSFORM;
+        return kDefaultWorldAlignmentInfo;
     }
 
     try {
-        const result = JSON.parse(fs.readFileSync(`${mapPath}`).toString());
-        return result as GeoPose;
+        const result = JSON.parse(fs.readFileSync(`${mapPath}`).toString()) as Record<string, unknown>;
+        return {
+            latitude: numOrNull(result.latitude),
+            longitude: numOrNull(result.longitude),
+            height: numOrNull(result.height),
+            matrix: (result.matrix as number[][]) ?? kDefaultWorldAlignmentInfo.matrix,
+        };
     } catch (error) {
         console.error(error);
-        return DEFAULT_TRANSFORM;
+        return kDefaultWorldAlignmentInfo;
     }
 }

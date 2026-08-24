@@ -83,11 +83,13 @@ export class HlocConfigurationStage extends IdempotentStage {
         const priorModelDir = this.hlocMapWorkDirectory + "/prior_model"; // TODO: make sure this is the same as datasetStrayColmapFilteredDir
         const hlocReconstructionDir = this.hlocMapWorkDirectory + "/hloc_reconstruction";
         const hlocConfigFile = this.hlocMapWorkDirectory + "/config.yaml";
+        const metricAlignmentMode = "coord_scale_only"; // TODO: make this configurable
         const processingCommand = `python3 hloc_generate_config.py \
             --hloc_dir=${this.config.hlocDir} \
             --input_model_dir ${priorModelDir} \
             --output_dir ${hlocReconstructionDir} \
-            --output_config_file ${hlocConfigFile}`;
+            --output_config_file ${hlocConfigFile} \
+            --metric_alignment_mode ${metricAlignmentMode}`;
         await this.executeCommand(processingCommand, this.config.shell);
     }
 }
@@ -108,6 +110,55 @@ export class HlocMapBuildStage extends IdempotentStage {
         const hlocConfigFile = this.hlocMapWorkDirectory + "/config.yaml";
         const processingCommand = `python3 hloc_build_map.py \
             --config_file ${hlocConfigFile}`;
+        await this.executeCommand(processingCommand, this.config.shell);
+    }
+}
+
+export class HlocMapScaleEstimationStage extends IdempotentStage {
+    // This stage performs metric alignment (scale estimation) on the reconstructed model
+    // It can be run independently from the model building, allowing for quick re-runs
+    // if the scale estimation fails
+
+    constructor(
+        private hlocMapWorkDirectory: string,
+        private config: EnvironmentalConfig,
+        publishTaskStatus: StageUpdatePublisher,
+        taskState: TaskDescription | undefined,
+    ) {
+        super(HlocMapScaleEstimationStage.stageName, config.scriptsDir, publishTaskStatus, taskState);
+    }
+
+    public static readonly stageName = "hlocMapScaleEstimation";
+
+    async scriptProcessing() {
+        const hlocReconstructionDir = this.hlocMapWorkDirectory + "/hloc_reconstruction";
+        const priorModelDir = this.hlocMapWorkDirectory + "/prior_model";
+        const transformJsonPath = this.hlocMapWorkDirectory + "/transform.json";
+        const configFile = this.hlocMapWorkDirectory + "/config.yaml";
+        
+        // Read config to get metric alignment parameters
+        const fs = require('fs');
+        const yaml = require('js-yaml');
+        const configContent = fs.readFileSync(configFile, 'utf8');
+        const hlocConfig = yaml.load(configContent) as any;
+        
+        const mode = (hlocConfig?.hloc_reconstruction?.metric_alignment_mode || 'none').toString().toLowerCase();
+        if (mode !== 'rescale_model' && mode !== 'coord_scale_only') {
+            throw new Error(`Invalid metric_alignment_mode: ${mode}`);
+        }
+        
+        const minSharedImages = hlocConfig?.hloc_reconstruction?.metric_alignment_min_shared_images || 4;
+        const minPairDistanceM = hlocConfig?.hloc_reconstruction?.metric_alignment_min_pair_distance_m || 0.05;
+        
+        // Call hloc_metric_alignment.py directly
+        const processingCommand = `python3 hloc_metric_alignment.py \
+            --prior_model_path ${priorModelDir} \
+            --reconstruction_path ${hlocReconstructionDir} \
+            --transform_json_path ${transformJsonPath} \
+            --mode ${mode} \
+            --min_shared_images ${minSharedImages} \
+            --min_pair_distance_m ${minPairDistanceM}`;
+        
         await this.executeCommand(processingCommand, this.config.shell);
     }
 }

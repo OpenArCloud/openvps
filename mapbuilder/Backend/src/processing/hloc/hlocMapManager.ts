@@ -12,7 +12,7 @@ import _ from "lodash";
 import {HlocCreator} from "./hlocCreator";
 import {v4 as uuidv4} from "uuid";
 import path from "node:path";
-import {HlocFormatStage, HlocImageFilterStage, HlocConfigurationStage, HlocMapBuildStage, HlocMapPlyExportStage, HlocMapZipExportStage} from "./hlocStages";
+import {HlocFormatStage, HlocImageFilterStage, HlocConfigurationStage, HlocMapBuildStage, HlocMapScaleEstimationStage, HlocMapPlyExportStage, HlocMapZipExportStage} from "./hlocStages";
 
 export function getHlocMapWorkDirectory(mapUploadRoot: string, hlocMapId: string) {
     return path.join(mapUploadRoot, "hlocMaps", hlocMapId);
@@ -69,6 +69,10 @@ export class HlocMapManager {
                         type: "hlocMapBuild",
                         status: TaskStatus.failed,
                     },
+                    hlocMapScaleEstimation: {
+                        type: "hlocMapScaleEstimation",
+                        status: TaskStatus.failed,
+                    },
                     hlocMapPlyExport: {
                         type: "hlocMapPlyExport",
                         status: TaskStatus.failed,
@@ -109,6 +113,10 @@ export class HlocMapManager {
                 },
                 hlocMapBuild: {
                     type: HlocMapBuildStage.stageName,
+                    status: TaskStatus.notStarted,
+                },
+                hlocMapScaleEstimation: {
+                    type: HlocMapScaleEstimationStage.stageName,
                     status: TaskStatus.notStarted,
                 },
                 hlocMapPlyExport: {

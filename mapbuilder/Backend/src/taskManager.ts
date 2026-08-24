@@ -61,7 +61,7 @@ export class TaskManager {
 
     public getAllStatuses(): DataSetStatus[] {
         const statuses: DataSetStatus[] = Array.from(this.dataSets.entries()).map(([id, taskProcessor]) => {
-            console.log(` [service] Retrieving status of ${id}`);
+            //console.log(` [service] Retrieving status of ${id}`);
             return taskProcessor.getCurrentStatus();
         });
 

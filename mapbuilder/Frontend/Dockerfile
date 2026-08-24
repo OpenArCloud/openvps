@@ -2,7 +2,7 @@
 # Licensed under the MIT License.
 # SPDX-License-Identifier: MIT
 
-FROM node:22-alpine AS build
+FROM node:24-alpine AS build
 
 WORKDIR /app
 
@@ -17,7 +17,7 @@ ENV VITE_MAPALIGNER_URL=${MAPALIGNER_URL}
 RUN npm run build
 
 
-FROM nginx:1.27-alpine
+FROM nginx:1.29.4-alpine
 
 COPY --from=build /app/dist /app
 COPY ./nginx.conf /etc/nginx/conf.d/default.conf

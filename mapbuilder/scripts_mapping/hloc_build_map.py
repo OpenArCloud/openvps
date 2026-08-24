@@ -47,6 +47,7 @@ from test_gpu import getGpuInfo
 
 import torch # only for printing the version and features
 
+
 def read_yaml(file_path):
     with open(file_path, "r") as f:
         return yaml.safe_load(f)
@@ -165,6 +166,8 @@ def hloc_build_map(config):
                 min_match_score=None,
                 camera_mode=CameraMode.SINGLE
             )
+
+
         print("ALL DONE.")
         return True
     except Exception as ex:

@@ -13,7 +13,6 @@ import {ThumbnailTask} from "./processing/thumbnailTask";
 import {HlocConfig} from "./processing/hloc/hlocConfig";
 import {HlocMapManager} from "./processing/hloc/hlocMapManager";
 
-import path from "node:path";
 import fs from "node:fs";
 
 export enum TaskStatus {
@@ -51,6 +50,7 @@ export interface HlocStages {
     hlocImageFilter: TaskDescription;
     hlocConfiguration: TaskDescription;
     hlocMapBuild: TaskDescription;
+    hlocMapScaleEstimation: TaskDescription;
     hlocMapPlyExport: TaskDescription;
     hlocMapZipExport: TaskDescription;
 }

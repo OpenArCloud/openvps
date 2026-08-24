@@ -29,13 +29,11 @@ export class GenericStatusPublisher<PersistedState> {
 
 export function publishStatusToFrontend(metadata: ProcessMetadata, task: TaskDescription, io: Server, frontendExtra?: any) {
     const frontendUpdate: FrontendStatusUpdate = {...metadata, ...task, ...frontendExtra};
-
-    console.log(` [publishStatus] sending status update: ${JSON.stringify(frontendUpdate)}`);
+    //console.log(` [publishStatus] sending status update: ${JSON.stringify(frontendUpdate)}`);
     io.emit("processingUpdate", JSON.stringify(frontendUpdate));
 }
 
 export function persistStatus<PersistedState>(statusFileName: string, fullState: PersistedState) {
-    console.log(` [publishStatus] persisting status update: ${JSON.stringify(fullState)}`);
-
+    //console.log(` [publishStatus] persisting status update: ${JSON.stringify(fullState)}`);
     fs.writeFileSync(statusFileName, JSON.stringify(fullState, null, 2));
 }

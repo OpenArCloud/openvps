@@ -8,13 +8,14 @@ import {HlocCreationState, TaskDescription, TaskStatus, TaskStatusPublisher} fro
 import {UploadLocation} from "../../uploadLocation";
 import {EnvironmentalConfig} from "../../index";
 import {ScriptExecutor} from "../scriptexecutor";
-import {stringify} from "yaml";
+
 import fs from "fs-extra";
 import path from "node:path";
 import {HlocConfig} from "./hlocConfig";
-import {HlocFormatStage, HlocImageFilterStage, HlocConfigurationStage, HlocMapBuildStage, HlocMapPlyExportStage, HlocMapZipExportStage} from "./hlocStages";
+import {HlocFormatStage, HlocImageFilterStage, HlocConfigurationStage, HlocMapBuildStage, HlocMapScaleEstimationStage, HlocMapPlyExportStage, HlocMapZipExportStage} from "./hlocStages";
 import {getHlocMapWorkDirectory} from "./hlocMapManager";
 
+//import {stringify} from "yaml";
 //export function writeHlocConfigToFile(hlocConfig: HlocConfig, uploadLocation: UploadLocation, mapId: string): string {
 //    const configFileName = path.join(getHlocMapWorkDirectory(uploadLocation.getDataSetRoot(), mapId), "mapBuildConfig.yaml")
 //
@@ -49,6 +50,9 @@ export class HlocCreator extends ScriptExecutor {
             case HlocMapBuildStage.stageName:
                 this.state.tasks.hlocMapBuild = task;
                 break;
+            case HlocMapScaleEstimationStage.stageName:
+                this.state.tasks.hlocMapScaleEstimation = task;
+                break;
             case HlocMapPlyExportStage.stageName:
                 this.state.tasks.hlocMapPlyExport = task;
                 break;
@@ -81,7 +85,12 @@ export class HlocCreator extends ScriptExecutor {
 
         if (this.state.tasks.hlocFormat.status != TaskStatus.completed) {
             const hlocFormatStatus = this.state.tasks.hlocFormat;
-            const hlocFormatStage = new HlocFormatStage(this.uploadLocation, this.config, this.subtaskPublishStatus, hlocFormatStatus);
+            const hlocFormatStage = new HlocFormatStage(
+                this.uploadLocation,
+                this.config,
+                this.subtaskPublishStatus,
+                hlocFormatStatus
+            );
             const result = await hlocFormatStage.execute();
             if (result === TaskStatus.failed) {
                 return this.state;
@@ -90,7 +99,13 @@ export class HlocCreator extends ScriptExecutor {
 
         if (this.state.tasks.hlocImageFilter.status != TaskStatus.completed) {
             const hlocImageFilterStatus = this.state.tasks.hlocImageFilter;
-            const hlocImageFilterStage = new HlocImageFilterStage(this.uploadLocation, this.state.mapId, this.config, this.subtaskPublishStatus, hlocImageFilterStatus);
+            const hlocImageFilterStage = new HlocImageFilterStage(
+                this.uploadLocation,
+                this.state.mapId,
+                this.config,
+                this.subtaskPublishStatus,
+                hlocImageFilterStatus
+            );
             const result = await hlocImageFilterStage.execute();
             if (result === TaskStatus.failed) {
                 return this.state;
@@ -99,7 +114,13 @@ export class HlocCreator extends ScriptExecutor {
 
         if (this.state.tasks.hlocConfiguration.status != TaskStatus.completed) {
             const hlocConfigurationStatus = this.state.tasks.hlocConfiguration;
-            const hlocConfigurationStage = new HlocConfigurationStage(workDir, this.state.mapId, this.config, this.subtaskPublishStatus, hlocConfigurationStatus);
+            const hlocConfigurationStage = new HlocConfigurationStage(
+                workDir,
+                this.state.mapId,
+                this.config,
+                this.subtaskPublishStatus,
+                hlocConfigurationStatus
+            );
             const result = await hlocConfigurationStage.execute();
             if (result === TaskStatus.failed) {
                 return this.state;
@@ -108,8 +129,28 @@ export class HlocCreator extends ScriptExecutor {
 
         if (this.state.tasks.hlocMapBuild.status != TaskStatus.completed) {
             const buildMapStatus = this.state.tasks.hlocMapBuild;
-            const mapBuildStage = new HlocMapBuildStage(workDir, this.config, this.subtaskPublishStatus, buildMapStatus);
+            const mapBuildStage = new HlocMapBuildStage(
+                workDir,
+                this.config,
+                this.subtaskPublishStatus,
+                buildMapStatus
+            );
             const result = await mapBuildStage.execute();
+            if (result === TaskStatus.failed) {
+                return this.state;
+            }
+        }
+
+        const mapScaleEstimationStatus = this.state.tasks.hlocMapScaleEstimation as TaskDescription | undefined;
+        // note: for backward compatibility, this task may not exist in older states
+        if (!mapScaleEstimationStatus || mapScaleEstimationStatus.status != TaskStatus.completed) {
+            const mapScaleEstimationStage = new HlocMapScaleEstimationStage(
+                workDir,
+                this.config,
+                this.subtaskPublishStatus,
+                mapScaleEstimationStatus
+            );
+            const result = await mapScaleEstimationStage.execute();
             if (result === TaskStatus.failed) {
                 return this.state;
             }

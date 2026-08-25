@@ -2,6 +2,9 @@ Note
 
 # MapBuilder
 
+Hierarchical-Localization [github](https://github.com/cvg/Hierarchical-Localization)
+[Apache-2.0 license](https://github.com/cvg/Hierarchical-Localization?tab=Apache-2.0-1-ov-file#readme)
+
 Svelte [github](https://github.com/sveltejs/svelte)
 [MIT license](https://github.com/sveltejs/svelte?tab=MIT-1-ov-file#readme)
 

@@ -179,6 +179,35 @@ def _rms_with_sim3(src: np.ndarray, tgt: np.ndarray, sim: pycolmap.Sim3d) -> flo
     return float(np.sqrt(np.mean(err**2)))
 
 
+def _decompose_matrix(matrix: np.ndarray) -> Tuple[np.ndarray, np.ndarray, float, List[float]]:
+    # Falls back to identity rotation/translation when matrix is missing/degenerate.
+    try:
+        M = np.asarray(matrix, dtype=np.float64)
+        if M.shape != (4, 4):
+            raise ValueError("matrix must be 4x4")
+        A = M[:3, :3]
+        t = M[:3, 3].copy()
+        bottom_row = M[3, :].tolist()
+        col_norms = np.linalg.norm(A, axis=0)
+        if col_norms.size != 3 or not np.all(np.isfinite(col_norms)) or np.any(col_norms < 1e-12):
+            raise ValueError("degenerate matrix linear part")
+        s = float(np.mean(col_norms))
+        R = A / s
+        return R, t, s, bottom_row
+    except Exception:
+        return np.eye(3), np.zeros(3), 1.0, [0.0, 0.0, 0.0, 1.0]
+
+
+def _compose_matrix(R: np.ndarray, t: np.ndarray, s: float, bottom_row: List[float]) -> List[List[float]]:
+    A_new = s * R
+    rows = [
+        [float(A_new[i, 0]), float(A_new[i, 1]), float(A_new[i, 2]), float(t[i])]
+        for i in range(3)
+    ]
+    rows.append([float(x) for x in bottom_row])
+    return rows
+
+
 def run_metric_alignment(
     prior_model_path: Path,
     reconstruction_path: Path,
@@ -231,19 +260,22 @@ def run_metric_alignment(
     else:
         scale_factor = s_uniform
 
-    payload: Dict[str, Any] = {
-        "latitude": None,
-        "longitude": None,
-        "height": None,
-        "matrix": [
-            [1, 0, 0, 0],
-            [0, 1, 0, 0],
-            [0, 0, 1, 0],
-            [0, 0, 0, 1],
-        ],
-        "coord_scale": {"target_unit": "SI_METER", "scale_factor": scale_factor},
-        "metric_alignment": diag,
-    }
+    map_transform_info: Dict[str, Any] = {}
+    if transform_json_path.exists():
+        with open(transform_json_path, "r", encoding="utf-8") as f:
+            map_transform_info = json.load(f)
+    # Keep rotation/translation from any prior (e.g. manual) alignment; only refresh the scale.
+    existing_matrix = np.asarray(map_transform_info.get("matrix", np.eye(4)), dtype=np.float64)
+    R_old, t_old, _s_old, bottom_row = _decompose_matrix(existing_matrix)
+    new_matrix = _compose_matrix(R_old, t_old, scale_factor, bottom_row)
+
+    payload: Dict[str, Any] = dict(map_transform_info)
+    payload.setdefault("latitude", None)
+    payload.setdefault("longitude", None)
+    payload.setdefault("height", None)
+    payload["matrix"] = new_matrix
+    payload["coord_scale"] = {"target_unit": "SI_METER", "scale_factor": scale_factor}
+    payload["metric_alignment"] = diag
 
     transform_json_path.parent.mkdir(parents=True, exist_ok=True)
     with open(transform_json_path, "w", encoding="utf-8") as f:

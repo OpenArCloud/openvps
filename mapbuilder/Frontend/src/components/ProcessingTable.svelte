@@ -5,9 +5,9 @@
 -->
 
 <script lang="ts">
-    import { localizerStore, processingStore, TaskStatus, type Workflow } from "../stores";
+    import { localizerStore, mapSearchQuery, processingStore, TaskStatus, type Workflow } from "../stores";
     import { createRender, createTable, Render, Subscribe } from "svelte-headless-table";
-    import { addPagination, addSortBy } from "svelte-headless-table/plugins";
+    import { addPagination } from "svelte-headless-table/plugins";
     import { Button } from "$lib/components/ui/button";
     import { readable } from "svelte/store";
     import * as Table from "$lib/components/ui/table";
@@ -17,6 +17,8 @@
     import Image from "./Image.svelte";
 
     let isLoading: boolean = false;
+    let sortColumn: "name" | "time" | undefined;
+    let sortDirection: "asc" | "desc" = "asc";
     const onLoading = (loading: boolean) => {
         isLoading = loading;
     };
@@ -49,7 +51,7 @@
 
     const initialPageSize: number = 50;
     const getRowEnd = (pageIndex: number) => {
-        const numRows = $processingStore.value.length;
+        const numRows = filteredWorkflows.length;
         const numPages = Math.floor(numRows / initialPageSize);
 
         if (pageIndex < numPages) {
@@ -72,11 +74,73 @@
         }
     };
 
-    $: table = createTable(readable($processingStore.value), {
+    const getSearchableText = (row: Workflow): string => {
+        const tasks = [...row.stages.values()];
+        const startTime = tasks.filter((task) => task.startTime).at(-1)?.startTime ?? 0;
+        const elapsedTime = tasks
+            .map((stage) => stage.runTime ?? 0)
+            .reduce((prevTime, totalTime) => prevTime + totalTime, 0);
+
+        return [
+            row.metadata.name,
+            row.metadata.id,
+            row.metadata.zip,
+            getFileSize(row.metadata.size),
+            ...tasks.flatMap((task) => [
+                task.type,
+                task.mapId,
+                task.status,
+                task.startTime,
+                task.runTime,
+            ]),
+            startTime ? new Date(startTime).toLocaleString() : "",
+            getRuntime(elapsedTime),
+        ]
+            .filter((value) => value !== undefined && value !== null)
+            .join(" ")
+            .toLocaleLowerCase();
+    };
+
+    const getCreationTime = (row: Workflow): number => {
+        return [...row.stages.values()].filter((task) => task.startTime).at(-1)?.startTime ?? 0;
+    };
+
+    const toggleSort = (column: "name" | "time") => {
+        if (sortColumn === column) {
+            sortDirection = sortDirection === "asc" ? "desc" : "asc";
+        } else {
+            sortColumn = column;
+            sortDirection = "asc";
+        }
+    };
+
+    const toggleSortableColumn = (column: string) => {
+        if (column === "name" || column === "time") {
+            toggleSort(column);
+        }
+    };
+
+    $: filteredWorkflows = $processingStore.value.filter((workflow) =>
+        getSearchableText(workflow).includes($mapSearchQuery.trim().toLocaleLowerCase()),
+    );
+    $: sortedWorkflows = [...filteredWorkflows].sort((first, second) => {
+        if (!sortColumn) {
+            return 0;
+        }
+
+        const firstValue = sortColumn === "name" ? first.metadata.name ?? "" : getCreationTime(first);
+        const secondValue = sortColumn === "name" ? second.metadata.name ?? "" : getCreationTime(second);
+        const comparison =
+            typeof firstValue === "string"
+                ? firstValue.localeCompare(secondValue as string, undefined, { sensitivity: "base" })
+                : firstValue - (secondValue as number);
+        return sortDirection === "asc" ? comparison : -comparison;
+    });
+
+    $: table = createTable(readable(sortedWorkflows), {
         page: addPagination({
             initialPageSize,
         }),
-        sort: addSortBy(),
     });
     $: columns = table.createColumns([
         table.column({
@@ -89,11 +153,6 @@
                     name: value.name,
                     onLoading,
                 });
-            },
-            plugins: {
-                sort: {
-                    disable: true,
-                },
             },
         }),
         table.column({
@@ -109,11 +168,6 @@
                 return createRender(Image, {
                     src: `/maps/${value}/thumbnail`,
                 });
-            },
-            plugins: {
-                sort: {
-                    disable: true,
-                },
             },
         }),
         table.column({
@@ -142,7 +196,7 @@
         table.column({
             id: "status",
             accessor: (row: Workflow) => {
-                const tasks = [...row.stages.values()];
+                const tasks = [...row.stages.values()].filter((taskDescription) => taskDescription.type);
                 return tasks
                     .map((taskDescription) => {
                         let time = taskDescription.startTime
@@ -174,7 +228,7 @@
                     return 0;
                 }
             },
-            header: "Start Time",
+            header: "Creation Time",
             cell: ({ value }) => {
                 return new Date(value).toLocaleString();
             },
@@ -216,15 +270,18 @@
                     <Subscribe rowAttrs={headerRow.attrs()}>
                         <Table.Row>
                             {#each headerRow.cells as cell (cell.id)}
-                                <Subscribe attrs={cell.attrs()} let:attrs props={cell.props()} let:props>
+                                <Subscribe attrs={cell.attrs()} let:attrs>
                                     <Table.Head {...attrs}>
-                                        {#if cell.id === "action"}
-                                            <Render of={cell.render()} />
-                                        {:else}
-                                            <Button variant="ghost" on:click={props.sort.toggle}>
+                                        {#if cell.id === "name" || cell.id === "time"}
+                                            <Button
+                                                variant="ghost"
+                                                on:click={() => toggleSortableColumn(cell.id)}
+                                            >
                                                 <Render of={cell.render()} />
-                                                <ArrowUpDownSvg class={"ml-2 h-4 w-4"} />
+                                                <span class="ml-2"><ArrowUpDownSvg /></span>
                                             </Button>
+                                        {:else}
+                                            <Render of={cell.render()} />
                                         {/if}
                                     </Table.Head>
                                 </Subscribe>
@@ -277,7 +334,7 @@
         <div class="footerSide" />
         <div class="text-muted-foreground justify-center items-center">
             {"Showing row " +
-                ($pageIndex * $pageSize + $processingStore.value.length ? 1 : 0) +
+                (filteredWorkflows.length ? $pageIndex * $pageSize + 1 : 0) +
                 " to " +
                 getRowEnd($pageIndex)}
         </div>
@@ -302,6 +359,7 @@
     .root {
         height: 100%;
     }
+
 
     .footer {
         display: flex;

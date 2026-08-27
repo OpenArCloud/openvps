@@ -9,6 +9,8 @@ import { io, Socket } from "socket.io-client";
 import { API_URLS, AUTH_ENABLED } from "./config";
 import { getAuthenticationToken } from "./auth";
 
+export const mapSearchQuery = writable("");
+
 export interface StoreSubscribable<T> {
     subscribe: (this: void, run: Subscriber<T>, invalidate?: Invalidator<T> | undefined) => Unsubscriber;
 }

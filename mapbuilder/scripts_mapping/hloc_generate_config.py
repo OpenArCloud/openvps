@@ -13,7 +13,19 @@ import os
 import argparse
 
 
-def hloc_generate_config(hloc_dir, input_model_dir, output_dir, output_config_file, feature_conf="superpoint_aachen", matcher_conf="superglue", retrieval_conf="netvlad", pairs_strategy="from_retrieval"):
+def hloc_generate_config(
+    hloc_dir,
+    input_model_dir,
+    output_dir,
+    output_config_file,
+    feature_conf="superpoint_aachen",
+    matcher_conf="superglue",
+    retrieval_conf="netvlad",
+    pairs_strategy="from_retrieval",
+    metric_alignment_mode="none",
+    metric_alignment_min_shared_images=4,
+    metric_alignment_min_pair_distance_m=0.05,
+):
     try:
         hloc_dir_path = Path(hloc_dir)
         if not hloc_dir_path.exists() or not hloc_dir_path.is_dir():
@@ -31,12 +43,20 @@ def hloc_generate_config(hloc_dir, input_model_dir, output_dir, output_config_fi
         output_config_file_path = Path(output_config_file)
 
         # TODO: hardcoded config for now, but these values could be passed from the Web GUI
+        metric_alignment_mode = str(metric_alignment_mode).strip().lower()
+        if metric_alignment_mode not in ("none", "rescale_model", "coord_scale_only"):
+            print("Error: metric_alignment_mode must be none, rescale_model, or coord_scale_only")
+            return False
+
+        hloc_metric_alignment = metric_alignment_mode != "none"
+
         config = {
             "program_steps": {
                 "hloc_extract_features": True,
                 "hloc_find_image_pairs": True,
                 "hloc_matches_from_pairs": True,
                 "hloc_build_model": True,
+                "hloc_metric_alignment": hloc_metric_alignment,
             },
             "hloc_reconstruction" : {
                 "hloc_path": hloc_dir,
@@ -48,6 +68,9 @@ def hloc_generate_config(hloc_dir, input_model_dir, output_dir, output_config_fi
                 "prior_model_path": str(input_model_dir_path),
                 "reconstruction_path": str(output_dir),
                 "optimize_poses": True,
+                "metric_alignment_mode": metric_alignment_mode,
+                "metric_alignment_min_shared_images": int(metric_alignment_min_shared_images),
+                "metric_alignment_min_pair_distance_m": float(metric_alignment_min_pair_distance_m),
             },
         }
 
@@ -72,7 +95,33 @@ if __name__ == '__main__':
                         help="Output directory where the HLOC results will be written", required=True)
     parser.add_argument("--output_config_file", type=str, default=None,
                         help="Output config file", required=True)
+    parser.add_argument(
+        "--metric_alignment_mode",
+        type=str,
+        default="none",
+        help="none | rescale_model | coord_scale_only - align HLOC reconstruction to Stray prior metric frame",
+    )
+    parser.add_argument(
+        "--metric_alignment_min_shared_images",
+        type=int,
+        default=4,
+        help="Minimum images present in both prior and HLOC models for metric alignment",
+    )
+    parser.add_argument(
+        "--metric_alignment_min_pair_distance_m",
+        type=float,
+        default=0.05,
+        help="Prior-model pairs below this baseline (m) are ignored when checking spread",
+    )
     args = parser.parse_args()
 
-    if not hloc_generate_config(args.hloc_dir, args.input_model_dir, args.output_dir, args.output_config_file):
+    if not hloc_generate_config(
+        args.hloc_dir,
+        args.input_model_dir,
+        args.output_dir,
+        args.output_config_file,
+        metric_alignment_mode=args.metric_alignment_mode,
+        metric_alignment_min_shared_images=args.metric_alignment_min_shared_images,
+        metric_alignment_min_pair_distance_m=args.metric_alignment_min_pair_distance_m,
+    ):
         exit(-1)

@@ -1,7 +1,9 @@
 # Copyright 2025 Nokia
 # Licensed under the MIT License.
 # SPDX-License-Identifier: MIT
-FROM nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04 AS production
+
+#FROM nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04 AS production
+FROM nvidia/cuda:12.9.1-cudnn-devel-ubuntu24.04 AS production
 
 # Network proxy
 ARG HTTP_PROXY
@@ -26,8 +28,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     curl \
     git \
     ninja-build \
-    python3-pip \
-    python3-venv \
     unzip \
     wget
 
@@ -54,6 +54,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libeigen3-dev \
     libsuitesparse-dev
 
+
 # nodejs
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
@@ -61,6 +62,20 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get install -y nodejs
+
+# Install Python devtools
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get install -y \
+    python3-dev \
+    python3-setuptools \
+    python3-pip \
+    python3-venv
+# Create Python virtual environment
+ENV VIRTUAL_ENV=/opt/venv
+RUN python3 -m venv $VIRTUAL_ENV
+# Activate the virtual environment permanently
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # basic python dependencies
 RUN --mount=type=cache,target=/root/.cache/pip python3 -m pip install --upgrade --verbose \
@@ -72,11 +87,11 @@ RUN --mount=type=cache,target=/root/.cache/pip python3 -m pip install --upgrade 
     setuptools
 
 # Install hloc
-COPY --from=hloc_context . /app/hloc
-RUN --mount=type=cache,target=/root/.cache/pip python3 -m pip install --no-build-isolation --verbose -e /app/hloc
+COPY --from=hloc_context . /app/Hierarchical-Localization
+RUN --mount=type=cache,target=/root/.cache/pip python3 -m pip install --no-build-isolation --verbose -e /app/Hierarchical-Localization
 
 # Replace PyTorch with an earlier version if your GPU is not supported by the newest version
-# If you see PyTorch UserWarning: CUDA initialization: The NVIDIA driver on your system is too old (found version xxxx). 
+# If you see PyTorch UserWarning: CUDA initialization: The NVIDIA driver on your system is too old (found version xxxx).
 # Please update your GPU driver ... Alternatively, ... install a PyTorch version that has been compiled with your version of the CUDA driver.
 RUN pip uninstall torch -y
 RUN pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1
@@ -96,15 +111,31 @@ RUN npm run buildnolint
 # Create env file
 RUN echo "uploadsDir=/uploads" >> .env
 RUN echo "scriptsDir=/app/scripts" >> .env
-RUN echo "hlocDir=/app/hloc" >> .env
+RUN echo "hlocDir=/app/Hierarchical-Localization" >> .env
 RUN echo "shell=bash" >> .env
 RUN mkdir -p /uploads
 
 EXPOSE 3000
 
-ARG GROUP_ID
-ARG USER_ID
-RUN groupadd -r -g ${GROUP_ID} openvps && useradd --no-log-init -r -m -g openvps -u ${USER_ID} mapbuilder
-USER mapbuilder
+# Match host UID/GID for bind-mounted volumes. Ubuntu/CUDA images often already
+# define GID 1000 (e.g. group "ubuntu") and UID 1000, so blind groupadd/useradd fails.
+ARG GROUP_ID=1000
+ARG USER_ID=1000
+RUN set -eux; \
+    if getent group "${GROUP_ID}" >/dev/null; then \
+      GRP_NAME="$(getent group "${GROUP_ID}" | cut -d: -f1)"; \
+    else \
+      groupadd -r -g "${GROUP_ID}" openvps; \
+      GRP_NAME=openvps; \
+    fi; \
+    if getent passwd "${USER_ID}" >/dev/null; then \
+      echo "UID ${USER_ID} already present ($(getent passwd "${USER_ID}" | cut -d: -f1)), reusing for runtime USER"; \
+    else \
+      useradd --no-log-init -r -m -g "${GRP_NAME}" -u "${USER_ID}" mapbuilder; \
+    fi
+
+# Numeric user:group so runtime matches build args even when the base image already
+# had that UID/GID under a different account name (e.g. ubuntu).
+USER ${USER_ID}:${GROUP_ID}
 
 CMD ["node", "dist/index.js"]

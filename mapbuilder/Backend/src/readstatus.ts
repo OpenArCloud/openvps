@@ -16,12 +16,12 @@ export const parseStatusFiles = (uploadsRoot: string): DataSetStatus[] => {
         if (dataSetStatus.hloc) {
             for (const hlocProcess of dataSetStatus.hloc) {
                 if (hlocProcess.tasks.hlocFormat.status === TaskStatus.active) {
-                    console.log(` [parseStatus] task ${dataSetStatus.metadata.id} stopped in a previous run, setting Format status to Failed`);
+                    //console.log(` [parseStatus] task ${dataSetStatus.metadata.id} stopped in a previous run, setting Format status to Failed`);
                     hlocProcess.tasks.hlocFormat.status = TaskStatus.failed;
                 }
 
                 if (hlocProcess.tasks.hlocMapBuild.status === TaskStatus.active) {
-                    console.log(` [parseStatus] task ${dataSetStatus.metadata.id} stopped in a previous run, setting Process status to Failed`);
+                    //console.log(` [parseStatus] task ${dataSetStatus.metadata.id} stopped in a previous run, setting Process status to Failed`);
                     hlocProcess.tasks.hlocMapBuild.status = TaskStatus.failed;
                 }
             }

@@ -66,8 +66,6 @@ export class UploadLocation {
 
     private getFilenameWithoutExtension(filename: string): {fileStem: string; extension: string | undefined} {
         const extension = filename.split(".").pop();
-        console.log(` [uploadLocation] Extension of file is ${extension}`);
-
         if (extension) {
             return {fileStem: filename.substring(0, filename.length - (extension.length + 1)), extension};
         } else {

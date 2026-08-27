@@ -22,7 +22,6 @@ import {ExtractTask} from "./processing/extractTask";
 import {ThumbnailTask} from "./processing/thumbnailTask";
 import {authConfig} from "./auth";
 import {readHlocTransform, saveHlocTransform} from "./transform";
-import {map} from "lodash";
 
 function handleUpload(taskManager: TaskManager, uploadsRoot: string) {
     return async (req: Request, resp: Response) => {
@@ -114,7 +113,7 @@ export function startRestService(statuses: DataSetStatus[], config: Environmenta
     io.on("connection", (socket: Socket) => {
         console.log(" [service] frontend connected");
         socket.on("disconnect", () => {
-            console.log(" [service] user disconnected");
+            console.log(" [service] frontend disconnected");
         });
     });
 
@@ -134,8 +133,7 @@ export function startRestService(statuses: DataSetStatus[], config: Environmenta
     app.post("/uploadStrayRecordingZip", protectedRoute, handleUpload(taskManager, config.uploadsDir));
 
     app.get("/maps", protectedRoute, (req: Request, res: Response) => {
-        console.log(" [service] All status retrieval request");
-
+        //console.log(" [service] All status retrieval request");
         const statuses = taskManager.getAllStatuses();
         const response = {
             statuses: statuses,
@@ -361,7 +359,7 @@ export function startRestService(statuses: DataSetStatus[], config: Environmenta
     });
 
     httpServer.listen(3000, () => {
-        console.log("Server is running on port 3000");
+        console.log("MapBuilder Backend server is running on port 3000");
     });
 }
 

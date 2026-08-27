@@ -329,10 +329,10 @@ export function connectSocket() {
     }
     socket = io(API_URLS.WEBSOCKET, socketOptions);
     socket.on("connect", () => {
-        console.log("Connected to socket");
+        console.log("Connected to backend socket");
     });
     socket.on("disconnect", () => {
-        console.log("Disconnected from socket");
+        console.log("Disconnected from backend socket");
     });
     socket.on("metadataUpdate", (msg: string) => {
         const metadataUpdate: ProcessMetadata = JSON.parse(msg);

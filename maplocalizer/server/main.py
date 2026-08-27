@@ -132,9 +132,11 @@ def load_map_core(map_id: str) -> Tuple[bool, str]:
         mapConfigs[map_id] = map_config
 
         localizer = HlocLocalizer(debug=settings.debug)
-        if not localizer.load_map_transform(transform_path, map_id):
+        try:
+            localizer.load_map_transform(transform_path, map_id)
+        except Exception as ex:
             del mapConfigs[map_id]
-            return False, f"Failed to load map transform {map_id}"
+            return False, f"Failed to load map transform {map_id}: {ex}"
 
         localizer.load_map(map_config, map_id=map_id)
         localizers[map_id] = localizer
@@ -201,9 +203,11 @@ async def load_transform(id: str, response: Response):
         return {"ERROR": f"There is no map loaded with id {id}. Try to load it first."}
     map_path = allMapIdsAndPaths[id]
     transform_path = map_path / "transform.json"
-    if not localizers[id].load_map_transform(transform_path, id):
+    try:
+        localizers[id].load_map_transform(transform_path, id)
+    except Exception as ex:
         response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
-        return {"ERROR": f"Failed to load map transform {id}"}
+        return {"ERROR": f"Failed to load map transform {id}: {ex}"}
     _touch_map(id)
     return {"STATUS": f"Successfully updated the transform of map {id}"}
 

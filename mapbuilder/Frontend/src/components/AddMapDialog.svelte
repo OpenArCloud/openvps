@@ -23,6 +23,7 @@
     let mapName: string = "";
     let uploadDisabled: boolean = true;
     let uploading = false;
+    let uploadProgress: number | undefined;
     let selectedFile = "Choose File";
     let fileInputDom: HTMLInputElement | undefined;
     $: {
@@ -47,6 +48,7 @@
             return;
         }
         uploading = true;
+        uploadProgress = 0;
         const headers = new Headers();
         const formData = new FormData();
         formData.append("file-content", files[0]);
@@ -57,13 +59,22 @@
         }
 
         try {
-            const response: Response = await fetch(API_URLS.UPLOAD_STRAY_RECORDING_ZIP, {
-                method: "POST",
-                headers: headers,
-                body: formData,
+            const response = await new Promise<XMLHttpRequest>((resolve, reject) => {
+                const request = new XMLHttpRequest();
+                request.open("POST", API_URLS.UPLOAD_STRAY_RECORDING_ZIP);
+                headers.forEach((value, key) => request.setRequestHeader(key, value));
+                request.upload.addEventListener("progress", (event) => {
+                    uploadProgress = event.lengthComputable
+                        ? Math.round((event.loaded / event.total) * 100)
+                        : undefined;
+                });
+                request.addEventListener("load", () => resolve(request));
+                request.addEventListener("error", () => reject(new Error("Upload request failed")));
+                request.addEventListener("abort", () => reject(new Error("Upload was cancelled")));
+                request.send(formData);
             });
 
-            if (response.ok) {
+            if (response.status >= 200 && response.status < 300) {
                 files = undefined;
                 mapName = "";
                 $appStore.setAddDialogVisible(false);
@@ -72,6 +83,7 @@
             alert("Upload Failed " + err);
         } finally {
             uploading = false;
+            uploadProgress = undefined;
         }
     }
 </script>
@@ -118,10 +130,10 @@
             </div>
         </div>
         <div class="text-xs italic">
-            The recordings are stored only for map generation purposes.<br />You can delete them at any
+            The recordings are stored only for map generation purposes. You can delete them at any
             time.
         </div>
-        <Dialog.Footer>
+        <Dialog.Footer class="uploadFooter">
             <Button
                 type="submit"
                 disabled={uploadDisabled || uploading}
@@ -133,6 +145,19 @@
                     Upload
                 {/if}
             </Button>
+            {#if uploading}
+                <div
+                    class:indeterminate={uploadProgress === undefined}
+                    class="uploadProgress"
+                    role="progressbar"
+                    aria-label="Upload progress"
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                    aria-valuenow={uploadProgress}
+                >
+                    <div class="uploadProgressValue" style:width={`${uploadProgress ?? 100}%`} />
+                </div>
+            {/if}
         </Dialog.Footer>
     </Dialog.Content>
 </Dialog.Root>
@@ -144,4 +169,36 @@
     .fileInput {
         display: none;
     }
+    :global(.uploadFooter) {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.5rem;
+    }
+    .uploadProgress {
+        position: relative;
+        width: 100%;
+        height: 0.5rem;
+        overflow: hidden;
+        border-radius: 9999px;
+        background-color: hsl(var(--muted));
+    }
+    .uploadProgressValue {
+        height: 100%;
+        border-radius: inherit;
+        background-color: hsl(var(--primary));
+        transition: width 150ms ease-out;
+    }
+    .uploadProgress.indeterminate .uploadProgressValue {
+        width: 40%;
+        animation: uploadProgress 1.2s ease-in-out infinite;
+    }
+    @keyframes uploadProgress {
+        0% {
+            transform: translateX(-100%);
+        }
+        100% {
+            transform: translateX(250%);
+        }
+    }
+
 </style>

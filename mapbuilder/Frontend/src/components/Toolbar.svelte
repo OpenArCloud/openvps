@@ -8,6 +8,8 @@
     import { Button } from "$lib/components/ui/button";
     import * as Tooltip from "$lib/components/ui/tooltip";
     import { appStore } from "../stores";
+    import { mapSearchQuery } from "../stores";
+    import { Input } from "$lib/components/ui/input";
     import UploadSvg from "../svg/uploadCloud.svelte";
 
     const onAddClick = () => {
@@ -15,7 +17,8 @@
     };
 </script>
 
-<div>
+<div class="toolbar">
+    <Input bind:value={$mapSearchQuery} placeholder="Search maps" aria-label="Search maps" />
     <Tooltip.Root>
         <Tooltip.Trigger asChild let:builder>
             <Button builders={[builder]} variant="outline" on:click={onAddClick}>
@@ -35,5 +38,10 @@
         display: flex;
         justify-content: flex-start;
         stroke: theme("colors.secondary.foreground");
+    }
+
+    :global(.toolbar > input) {
+        max-width: 425px;
+        margin-right: 12px;
     }
 </style>

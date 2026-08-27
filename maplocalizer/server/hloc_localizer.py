@@ -16,7 +16,8 @@ from hloc.utils.parsers import names_to_pair
 from hloc.localize_sfm import do_covisibility_clustering
 
 from types import SimpleNamespace
-from typing import List, Tuple
+from dataclasses import dataclass
+from typing import Any, List, Mapping, Optional, Tuple
 from collections import defaultdict
 
 import torch
@@ -30,9 +31,142 @@ from pathlib import Path
 import json
 import yaml
 
+from base_localizer import BaseLocalizer, LocalizationResult
 from oscp.geopose import GeoPose, Position, Quaternion
 from oscp.geoposeprotocol import CameraParameters
 from oscp.geopose_utils import enu_to_geodetic
+from oscp.spatialdds_types import (
+    CoordConvention,
+    CoordScale,
+    CoordScaleTargetUnit,
+    CovMatrix,
+    FramedPose,
+    FrameRef,
+    PoseSE3,
+    QuaternionXYZW,
+    Vec3,
+)
+
+
+@dataclass
+class MapTransformInfo:
+    """Georeferencing from ``transform.json`` for one map (single loaded snapshot).
+
+    ``frame_ref`` carries ``coord_convention`` and ``coord_scale`` (SpatialDDS / FramedPose).
+    ``coord_convention`` / ``coord_scale`` may appear at the root of older files; prefer
+    a ``frame_ref`` object (SpatialDDS-style) with ``has_coord_*`` flags. When scale is
+    absent (legacy root or ``frame_ref`` without ``coord_scale``), it is derived from the
+    upper-left 3x3 of the map->ENU matrix (after the graphics premultiply).
+
+    ``map_to_enu_transform`` is the 4x4 map-to-ENU matrix after the graphics-to-row
+    premultiply. ``frame_ref.fqn`` is derived from the ``map_id`` passed to
+    ``load_map_transform``; ``HlocLocalizer.map_id`` is set separately in ``load_map``.
+    ``geodetic_ref`` is ``None`` when ``transform.json`` has no geodetic anchor (all of
+    latitude, longitude, height null or omitted); global GeoPose output is skipped in that case.
+    """
+
+    map_to_enu_transform: np.ndarray
+    geodetic_ref: Optional[Position]
+    frame_ref: FrameRef
+
+    @staticmethod
+    def _meters_per_frame_unit_from_linear_map_to_enu(L: np.ndarray) -> float:
+        """Uniform scale s when linear part is ~s*R (R orthogonal): mean column L2 norm."""
+        norms = np.linalg.norm(L, axis=0)
+        if norms.size != 3 or not np.all(np.isfinite(norms)) or np.any(norms < 1e-12):
+            return 1.0
+        return float(np.mean(norms))
+
+    @staticmethod
+    def _coord_convention_from_transform_json(data: Mapping[str, Any]) -> CoordConvention:
+        """Parse optional ``coord_convention`` (underscore key); default ``CV``."""
+        raw = data.get("coord_convention")
+        if raw is None:
+            return CoordConvention.CV
+        return CoordConvention(str(raw))
+
+    @staticmethod
+    def _geodetic_ref_from_transform_json(data: Mapping[str, Any]) -> Optional[Position]:
+        """Return ``Position`` if all geodetic fields are set, or ``None`` if all absent/null."""
+        lat = data.get("latitude")
+        lon = data.get("longitude")
+        h = data.get("height")
+        absent = (lat is None, lon is None, h is None)
+        if all(absent):
+            return None
+        if not any(absent):
+            return Position(float(lat), float(lon), float(h))
+        raise ValueError(
+            "transform.json: set all of latitude, longitude, height or omit / JSON-null "
+            "all three for maps without geodetic alignment"
+        )
+
+    @classmethod
+    def from_transform_json(cls, data: Mapping[str, Any], map_id: str) -> "MapTransformInfo":
+        """Build from a loaded ``transform.json`` object (after reading with ``json.load``).
+
+        Prefers ``frame_ref`` for convention and scale; falls back to top-level
+        ``coord_convention`` / ``coord_scale`` for older files. ``uuid`` / ``fqn`` in
+        ``frame_ref`` are always replaced with values derived from ``map_id``.
+        """
+        mid = str(map_id)
+
+        # Map to ENU transform matrix
+        T = np.asarray(data["matrix"], dtype=float)
+
+        # We convert from graphics convention (X right, Y up, Z backwards) to ENU convention (X/E right, Y/N forward, Z/U up)
+        # rotation around X with +90deg
+        graphics_to_robotics_transform = np.array(
+            [
+                [1, 0, 0, 0],
+                [0, 0, -1, 0],
+                [0, 1, 0, 0],
+                [0, 0, 0, 1],
+            ]
+        )
+        T = np.matmul(graphics_to_robotics_transform, T)
+        ref = cls._geodetic_ref_from_transform_json(data)
+        L = T[:3, :3]
+        s = cls._meters_per_frame_unit_from_linear_map_to_enu(L)
+        derived_cs = CoordScale(CoordScaleTargetUnit.SI_METER, s)
+        meta_kv = None
+        fr_raw = data.get("frame_ref")
+        if isinstance(fr_raw, Mapping):
+            fr_in = FrameRef.from_json(fr_raw)
+            meta_kv = fr_in.meta_kv
+            if fr_in.has_coord_convention:
+                coord_conv = fr_in.coord_convention
+            else:
+                coord_conv = CoordConvention.CV
+            if fr_in.has_coord_scale and fr_in.coord_scale is not None:
+                cs = fr_in.coord_scale
+            else:
+                cs = derived_cs
+        else:
+            raw_cs = data.get("coord_scale")
+            if raw_cs is not None:
+                cs = CoordScale.from_json(raw_cs)
+            else:
+                cs = derived_cs
+            coord_conv = cls._coord_convention_from_transform_json(data)
+        if cs.target_unit != CoordScaleTargetUnit.SI_METER:
+            raise ValueError(
+                f"Unsupported coord_scale.target_unit: {cs.target_unit!r}"
+            )
+        frame_ref = FrameRef(
+            uuid=mid,
+            fqn=f"openvps/hloc/{mid}/colmap_world",
+            has_coord_convention=True,
+            coord_convention=coord_conv,
+            has_coord_scale=True,
+            coord_scale=cs,
+            meta_kv=meta_kv,
+        )
+        return cls(
+            map_to_enu_transform=T,
+            geodetic_ref=ref,
+            frame_ref=frame_ref,
+        )
 
 
 # code adapted from hloc.localize_sfm.QueryLocalizer
@@ -60,15 +194,24 @@ class QueryLocalizerNew:
         return ret
 
 
-class HlocLocalizer():
+class HlocLocalizer(BaseLocalizer):
 
     def __init__(self, debug=False):
         self.debug=debug
         self.kQueryImageName = 'query'
         self.covisibility_clustering = True
-        self.map_to_ENU_transform = np.eye(4)
-        self.map_geodetic_ref = Position(0,0,0)
+        self.map_id: str = ""
+        self.map_transform_info: Optional[MapTransformInfo] = None
 
+    @property
+    def map_coord_scale(self) -> CoordScale:
+        """``CoordScale`` from ``transform.json``, or matrix-derived when omitted there."""
+        if self.map_transform_info is None:
+            return CoordScale(CoordScaleTargetUnit.SI_METER, 1.0)
+        fr = self.map_transform_info.frame_ref
+        if fr.has_coord_scale and fr.coord_scale is not None:
+            return fr.coord_scale
+        return CoordScale(CoordScaleTargetUnit.SI_METER, 1.0)
 
     def get_all_map_ids_and_paths(rootDir:str|Path):
         if isinstance(rootDir, str):
@@ -114,8 +257,17 @@ class HlocLocalizer():
                 return None
 
 
-    def load_map(self, config):
+    def load_map(self, config, map_id: str):
         self.config = config
+        if self.map_transform_info is None:
+            raise RuntimeError(
+                "load_map_transform(map_path, map_id) must succeed for this map before load_map"
+            )
+        if self.map_transform_info.frame_ref.uuid != str(map_id):
+            raise RuntimeError(
+                "load_map map_id does not match the map_id used in load_map_transform"
+            )
+        self.map_id = str(map_id)
 
         print(f"Pytorch version: {torch.__version__}")
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -184,32 +336,21 @@ class HlocLocalizer():
             self.load_map_global_features(global_features_path)
 
 
-    def load_map_transform(self, map_transform_path:Path):
+    def load_map_transform(self, map_transform_path: Path, map_id: str):
+        mid = str(map_id)
+        if self.map_id and mid != self.map_id:
+            raise ValueError(
+                f"load_map_transform map_id {mid!r} does not match loaded map_id {self.map_id!r}"
+            )
         try:
             with open(str(map_transform_path), 'r') as file:
                 data = json.load(file)
-                self.map_to_ENU_transform = data['matrix']
-
-                # We convert from graphics convention (X right, Y up, Z backwards) to ENU convention (X/E right, Y/N forward, Z/U up)
-                # rotation around X with +90deg
-                graphics_to_robotics_transform = np.array([
-                    [1, 0, 0, 0],
-                    [0, 0,-1, 0],
-                    [0, 1, 0, 0],
-                    [0, 0, 0, 1]
-                ])
-                self.map_to_ENU_transform = np.matmul(graphics_to_robotics_transform, self.map_to_ENU_transform)
-
-                ref_lat = data['latitude']
-                ref_lon = data['longitude']
-                ref_h = data['height']
-                self.map_geodetic_ref = Position(ref_lat, ref_lon, ref_h)
+                self.map_transform_info = MapTransformInfo.from_transform_json(data, mid)
             print(f"Successfully loaded map transform from {map_transform_path}")
             return True
-        except:
-            print(f"Could not load map transform from {map_transform_path}")
+        except Exception as ex:
+            print(f"Could not load map transform from {map_transform_path}: {ex}")
             return False
-
 
 
     def export_map(self):
@@ -473,8 +614,7 @@ class HlocLocalizer():
 
 
     # NOTE(soeroesg): new code, inspired by hloc.localize_sfm, but this can run online
-    def localize(self, query_image, camera_parameters: CameraParameters) -> GeoPose | None:
-
+    def localize(self, query_image, camera_parameters: CameraParameters) -> LocalizationResult:
         print("Camera model parsing...")
         # NOTE(soeroesg): we do not have EXIF as we do not have a photo file :(
         # camera = pycolmap.infer_camera_from_image(query_image)
@@ -546,6 +686,10 @@ class HlocLocalizer():
                 continue
             db_ids.append(self.db_name_to_id[n])
 
+        if len(db_ids) == 0:
+            print("No valid database images available for localization.")
+            return LocalizationResult(geoposes=[], framed_poses=[])
+
         cam_from_world = {}
         qname = self.kQueryImageName
         if self.covisibility_clustering:
@@ -569,7 +713,7 @@ class HlocLocalizer():
                 kMinNumInliers = 20
                 if ret["num_inliers"] < kMinNumInliers:
                     print(f'Rejecting solution due to low number of inliers')
-                    return None
+                    return LocalizationResult(geoposes=[], framed_poses=[])
 
             logs["loc"][qname] = {
                 "db": db_ids,
@@ -610,6 +754,11 @@ class HlocLocalizer():
                     f.write(f"1 {qvec} {tvec} 1 {name}\n\n")
 
         geoPoses = [] # sometimes we get multiple hypotheses
+        framed_poses: List[FramedPose] = []
+        mt = self.map_transform_info
+        if mt is None:
+            return LocalizationResult(geoposes=[], framed_poses=[])
+        frame_ref = mt.frame_ref
         for qname, t in cam_from_world.items():
             # Note: t is of type pycolmap.Rigid3d
             pose_c2m = np.eye(4)
@@ -621,10 +770,23 @@ class HlocLocalizer():
                 euler_c2m = Rotation.from_matrix(pose_c2m[:3,:3]).as_euler(seq='xyz', degrees=True)
                 print(f"euler_map: {euler_c2m}")
 
+            # Assemble the pose in the map frame
+            rot_map = Rotation.from_matrix(pose_c2m[:3, :3])
+            qx, qy, qz, qw = rot_map.as_quat()
+            pose_se3 = PoseSE3(
+                Vec3(float(pose_c2m[0, 3]), float(pose_c2m[1, 3]), float(pose_c2m[2, 3])),
+                QuaternionXYZW(float(qx), float(qy), float(qz), float(qw)),
+            )
+            framed_poses.append(
+                FramedPose(pose=pose_se3, frame_ref=frame_ref, cov=CovMatrix())
+            )
+
+            # Convert to ENU frame
             # Multiply with map to ENU transform
-            pose_c2enu = np.matmul(self.map_to_ENU_transform, pose_c2m)
+            pose_c2enu = np.matmul(mt.map_to_enu_transform, pose_c2m)
             tvec_enu = pose_c2enu[:3,3]
             #quat_enu = Rotation.from_matrix(pose_c2enu[:3,:3]).as_quat() # This is still in vision convention, camera looking upwards
+            
             # We have to convert the orientation from computer vision (X right, Y down, Z forward) to robotics convention (X forward, Y left, Z up)
             rot_enu_cv = Rotation.from_matrix(pose_c2enu[:3,:3])
             rot_cv_to_rob = Rotation.from_matrix([
@@ -641,14 +803,26 @@ class HlocLocalizer():
                 euler_enu = Rotation.from_quat(quat_enu).as_euler(seq='xyz', degrees=True)
                 print(f"euler_enu: {euler_enu}")
 
-            # convert to geopose using the reference position of the map
-            lat, lon, h = enu_to_geodetic(tvec_enu[0], tvec_enu[1], tvec_enu[2],
-                    self.map_geodetic_ref.lat, self.map_geodetic_ref.lon, self.map_geodetic_ref.h)
+            ref = mt.geodetic_ref
+            if ref is not None:
+                # convert to geopose using the reference position of the map
+                lat, lon, h = enu_to_geodetic(
+                    tvec_enu[0],
+                    tvec_enu[1],
+                    tvec_enu[2],
+                    ref.lat,
+                    ref.lon,
+                    ref.h,
+                )
+                geoPose = GeoPose(
+                    position=Position(lat, lon, h),
+                    quaternion=Quaternion(
+                        quat_enu[0], quat_enu[1], quat_enu[2], quat_enu[3]
+                    ),
+                )
+                geoPoses.append(geoPose)
 
-            geoPose = GeoPose(position=Position(lat, lon, h), quaternion=Quaternion(quat_enu[0], quat_enu[1], quat_enu[2], quat_enu[3]))
-            geoPoses.append(geoPose)
-
-        if len(geoPoses) == 0:
-            return None
-        print(f"Found {len(geoPoses)} pose hypotheses. Returning the first one.")
-        return geoPoses[0]
+        if len(framed_poses) == 0:
+            return LocalizationResult(geoposes=[], framed_poses=[])
+        print(f"Found {len(framed_poses)} pose hypotheses.")
+        return LocalizationResult(geoposes=geoPoses, framed_poses=framed_poses)

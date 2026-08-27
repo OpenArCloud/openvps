@@ -5,7 +5,7 @@
 # This file is part of OpenVPS: Open Visual Positioning Service
 # Author: Gabor Soros (gabor.soros@nokia-bell-labs.com)
 
-FROM nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04 AS production
+FROM nvidia/cuda:12.9.1-cudnn-devel-ubuntu24.04 AS production
 
 # Network proxy
 ARG HTTP_PROXY
@@ -30,8 +30,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     curl \
     git \
     ninja-build \
-    python3-pip \
-    python3-venv \
     unzip \
     wget
 
@@ -58,10 +56,19 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libeigen3-dev \
     libsuitesparse-dev
 
+# Install Python devtools
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get install -y \
+    python3-dev \
+    python3-setuptools \
+    python3-pip \
+    python3-venv
 # Create Python virtual environment
-#RUN python3 -m pip install --upgrade pip
-#RUN python3 -m venv .venv
-#RUN . .venv/bin/activate
+ENV VIRTUAL_ENV=/opt/venv
+RUN python3 -m venv $VIRTUAL_ENV
+# Activate the virtual environment permanently
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # Install OpenCV and other basic dependencies
 RUN --mount=type=cache,target=/root/.cache/pip python3 -m pip install --upgrade --verbose \
@@ -72,11 +79,12 @@ RUN --mount=type=cache,target=/root/.cache/pip python3 -m pip install --upgrade 
     setuptools
 
 # Install hloc
-COPY --from=hloc_context . /app/hloc
-RUN --mount=type=cache,target=/root/.cache/pip python3 -m pip install --no-build-isolation --verbose -e /app/hloc
+COPY --from=hloc_context . /app/Hierarchical-Localization
+RUN --mount=type=cache,target=/root/.cache/pip python3 -m pip install packaging && \
+    python3 -m pip install --no-build-isolation --verbose -e /app/Hierarchical-Localization
 
 # Replace PyTorch with an earlier version if your GPU is not supported by the newest version
-# If you see PyTorch UserWarning: CUDA initialization: The NVIDIA driver on your system is too old (found version xxxx). 
+# If you see PyTorch UserWarning: CUDA initialization: The NVIDIA driver on your system is too old (found version xxxx).
 # Please update your GPU driver ... Alternatively, ... install a PyTorch version that has been compiled with your version of the CUDA driver.
 RUN pip uninstall torch -y
 RUN pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1
@@ -92,6 +100,8 @@ COPY . .
 RUN echo "appName=OpenVPS-MapLocalizer" >> server/.env
 RUN echo "uploadsDir=/uploads" >> server/.env
 RUN echo "debug=False" >> server/.env
+RUN echo "maxLoadedMaps=8" >> server/.env
+RUN echo "workerId=docker" >> server/.env
 
 # default FastAPI port
 EXPOSE 8000

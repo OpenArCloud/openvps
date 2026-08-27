@@ -88,11 +88,6 @@ MY_HTTPS_PROXY=
 MY_USER_ID=1000
 MY_GROUP_ID=1000
 
-# Default reference point in geo coordinates
-DEFAULT_LONGITUDE=
-DEFAULT_LATITUDE=
-DEFAULT_HEIGHT=0
-
 # Shared folder where maps are stored (default ${HOME}/data/maps)
 MY_SHARED_MAPS_DIR=${HOME}/data/maps
 
@@ -179,7 +174,7 @@ Once you recorded a sequence, go to the iOS Files app on your phone, find the fi
 Once you uploaded your image sequence dataset, it will get a unique ID assigned, it gets extracted, the video gets converted to an image sequences, the images get resized and rotated, and a thumbnail gets assigned to the dataset. Now you can start the map building process by pressing the play button. This might take around 10-30 minutes depending on the size of your recording.
 
 ### MapAligner
-Once the map is built, more buttons will appear in the dataset's GUI. Next, you need to align the map with the world by clicking on the cross arrows icon, which opens the MapAligner with the corresponding map. First you need to define the coarse location by navigation the map view to your mapped street. Open the 'set reference origin' panel and check 'set reference origin with click'. Click on any point that you want to be the reference of the alignment, it can be any point in the neighborhood. Next, perform the map alignment with the gizmo. You can adjust the scale with the sliders in the left side menu. Finally, press the big green save button, this writes the transform to the MapBuilder.
+Once the map is built, more buttons will appear in the dataset's GUI. Next, you need to align the map with the world by clicking on the cross arrows icon, which opens the MapAligner with the corresponding map. First you need to define the coarse location by navigation the map view to your mapped street. Open the 'set georeference origin' panel and check 'set georeference origin with click'. Click on any point that you want to be the reference of the alignment, it can be any point in the neighborhood. Next, perform the map alignment with the gizmo. You can adjust the scale with the sliders in the left side menu. Finally, press the big green save button, this writes the transform to the MapBuilder.
 
 ### MapLocalizer
 Once your map is aligned with the world, it is ready to be served in the MapLocalizer. Click on the localization pin icon of the dataset's GUI, which loads the map into the MapLocalizer. This might take up to 30 seconds depending on the map size. Once the map is loaded, you can send GeoPoseRequest queries to the MapLocalizer's `/localize/geopose` endpoint. 

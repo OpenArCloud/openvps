@@ -16,6 +16,10 @@ import { useMap } from "react-three-map";
 import { PivotControls } from "./pivotcontrols";
 import { MAX_PROGRESS } from "./page";
 
+// Greenwich Observatory, used as the visual fallback for maps without georeferencing.
+const FALLBACK_LATITUDE = 51.47684731776207;
+const FALLBACK_LONGITUDE = -0.0005196757942558923;
+
 export default function ThreeJsViewer({
   url,
   latitude,
@@ -35,10 +39,16 @@ export default function ThreeJsViewer({
   const mapStyleUrl = darkMode
     ? "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
     : "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
+  const mapLatitude = Number.isFinite(latitude) && latitude >= -90 && latitude <= 90
+    ? latitude
+    : FALLBACK_LATITUDE;
+  const mapLongitude = Number.isFinite(longitude) && longitude >= -180 && longitude <= 180
+    ? longitude
+    : FALLBACK_LONGITUDE;
 
   const [viewState, setViewState] = useState({
-    longitude,
-    latitude,
+    longitude: mapLongitude,
+    latitude: mapLatitude,
     zoom: 19,
     pitch: 30,
   });
@@ -47,11 +57,11 @@ export default function ThreeJsViewer({
     setViewState((viewState) => {
       return {
         ...viewState,
-        longitude,
-        latitude,
+        longitude: mapLongitude,
+        latitude: mapLatitude,
       };
     });
-  }, [longitude, latitude]);
+  }, [mapLongitude, mapLatitude]);
 
   return (
     <div style={{ height: "100%" }}>
@@ -71,7 +81,7 @@ export default function ThreeJsViewer({
             </group>
           </MapLibreCanvas>
         ) : (
-          <MapLibreCanvas latitude={latitude} longitude={longitude}>
+          <MapLibreCanvas latitude={mapLatitude} longitude={mapLongitude}>
             <group>
               <hemisphereLight args={["#ffffff", "#60666C"]} position={[1, 4.5, 3]} />
               <PlyObject

@@ -31,7 +31,7 @@ function reshape4x4(seq) {
   return output;
 }
 
-/** @typedef {{matrix:number[][], longitude:number, latitude:number, height:number}} Data */
+/** @typedef {{matrix:number[][], longitude:number|null, latitude:number|null, height:number|null}} Data */
 
 /** @typedef {{id: string, name: string, size:number}} DataSet */
 
@@ -42,13 +42,22 @@ export default function Matcher() {
   const [pointSize, setPointSize] = useState(1);
   const [progress, setProgress] = useState(0);
 
-  const initialLatitude = parseFloat(process.env.NEXT_PUBLIC_DEFAULT_LATITUDE);
-  const initialLongitude = parseFloat(process.env.NEXT_PUBLIC_DEFAULT_LONGITUDE);
-  const initialHeight = parseFloat(process.env.NEXT_PUBLIC_DEFAULT_HEIGHT ?? "0");
+  const [latitude, setLatitude] = useState(NaN);
+  const [longitude, setLongitude] = useState(NaN);
+  const [height, setHeight] = useState(NaN);
 
-  const [latitude, setLatitude] = useState(initialLatitude);
-  const [longitude, setLongitude] = useState(initialLongitude);
-  const [height, setHeight] = useState(initialHeight);
+  function setGeoreference(nextLatitude, nextLongitude, nextHeight) {
+    const values = [nextLatitude, nextLongitude, nextHeight];
+    if (values.some((value) => !Number.isFinite(value))) {
+      setLatitude(NaN);
+      setLongitude(NaN);
+      setHeight(NaN);
+      return;
+    }
+    setLatitude(nextLatitude);
+    setLongitude(nextLongitude);
+    setHeight(nextHeight);
+  }
 
   const [refMouseEnabled, setRefMouseEnabled] = useState(false);
 
@@ -111,10 +120,14 @@ export default function Matcher() {
   function pickReference(event) {
     if (refMouseEnabled) {
       const { lat, lng } = event.lngLat;
-      setLongitude(lng);
-      setLatitude(lat);
+      setGeoreference(lat, lng, Number.isFinite(height) ? height : 0);
       setRefMouseEnabled(false);
     }
+  }
+
+  function clearReference() {
+    setGeoreference(NaN, NaN, NaN);
+    setRefMouseEnabled(false);
   }
 
   /*console.log("longitude", longitude);
@@ -146,6 +159,23 @@ export default function Matcher() {
   async function save() {
     if (!selectedMap) {
       console.error("No map selected");
+      return;
+    }
+    const geoFields = [latitude, longitude, height];
+    const numGeoFieldsSet = geoFields.filter((v) => Number.isFinite(v)).length;
+    if (numGeoFieldsSet !== 0 && numGeoFieldsSet !== geoFields.length) {
+      alert(
+        "Set all of latitude, longitude and height, or clear all three (no geo anchor). " +
+          "maplocalizer rejects a partially set georeference origin."
+      );
+      return;
+    }
+    if (Number.isFinite(latitude) && (latitude < -90 || latitude > 90)) {
+      alert("Latitude must be between -90 and 90.");
+      return;
+    }
+    if (Number.isFinite(longitude) && (longitude < -180 || longitude > 180)) {
+      alert("Longitude must be between -180 and 180.");
       return;
     }
     console.log(output);
@@ -180,9 +210,7 @@ export default function Matcher() {
           credentials: "include",
         }).then((response) => response.json());
 
-        setLatitude(data.latitude);
-        setLongitude(data.longitude);
-        setHeight(data.height);
+        setGeoreference(data.latitude ?? NaN, data.longitude ?? NaN, data.height ?? NaN);
         const matrix = new Matrix4().fromArray(data.matrix.flat()).transpose();
         const position = new Vector3();
         const quaternion = new Quaternion();
@@ -225,21 +253,22 @@ export default function Matcher() {
                   setTranslation={setTranslation}
                   setRotation={setRotation}
                   setScale={setScale}
-                  setLatitude={setLatitude}
-                  setLongitude={setLongitude}
+                  setGeoreference={setGeoreference}
                 />
                 <details className="collapse collapse-arrow border border-base-300 dark:border-neutral">
-                  <summary className="collapse-title">Set reference origin</summary>
+                  <summary className="collapse-title">Set georeference origin</summary>
                   <div className="collapse-content flex flex-col gap-2">
                     <ReferenceInput
                       longitude={longitude}
                       latitude={latitude}
                       height={height}
-                      setLongitude={setLongitude}
-                      setLatitude={setLatitude}
-                      setHeight={setHeight}
+                      setGeoreference={setGeoreference}
                     />
-                    <ReferenceMouse enabled={refMouseEnabled} setEnabled={setRefMouseEnabled} />
+                    <ReferenceMouse
+                      enabled={refMouseEnabled}
+                      setEnabled={setRefMouseEnabled}
+                      onClear={clearReference}
+                    />
                   </div>
                 </details>
                 <details className="collapse collapse-arrow border border-base-300 dark:border-neutral">
@@ -355,7 +384,7 @@ function LoadFile({ maps, selectedMap, setSelectedMap, progress, modified }) {
   );
 }
 
-function LoadConfig({ setTranslation, setRotation, setScale, setLatitude, setLongitude }) {
+function LoadConfig({ setTranslation, setRotation, setScale, setGeoreference }) {
   const textArea = useRef(null);
   function load() {
     /** @type {Data} */
@@ -368,8 +397,7 @@ function LoadConfig({ setTranslation, setRotation, setScale, setLatitude, setLon
     setTranslation(translation);
     setRotation(new Euler().setFromQuaternion(quaternion));
     setScale(scale.x);
-    setLatitude(input.latitude);
-    setLongitude(input.longitude);
+    setGeoreference(input.latitude ?? NaN, input.longitude ?? NaN, input.height ?? NaN);
   }
   return (
     <>
@@ -390,7 +418,39 @@ function LoadConfig({ setTranslation, setRotation, setScale, setLatitude, setLon
   );
 }
 
-function ReferenceInput({ longitude, latitude, height, setLongitude, setLatitude, setHeight }) {
+function ReferenceInput({
+  longitude,
+  latitude,
+  height,
+  setGeoreference,
+}) {
+  const [latitudeText, setLatitudeText] = useState(formatReferenceValue(latitude));
+  const [longitudeText, setLongitudeText] = useState(formatReferenceValue(longitude));
+  const [heightText, setHeightText] = useState(formatReferenceValue(height));
+
+  useEffect(() => setLatitudeText(formatReferenceValue(latitude)), [latitude]);
+  useEffect(() => setLongitudeText(formatReferenceValue(longitude)), [longitude]);
+  useEffect(() => setHeightText(formatReferenceValue(height)), [height]);
+
+  function commitReferenceValues() {
+    const values = [latitudeText, longitudeText, heightText].map((value) => Number(value));
+    if (values.some((value) => !Number.isFinite(value))) {
+      setGeoreference(NaN, NaN, NaN);
+      return;
+    }
+    if (values[0] < -90 || values[0] > 90) {
+      alert("Latitude must be between -90 and 90.");
+      setGeoreference(NaN, NaN, NaN);
+      return;
+    }
+    if (values[1] < -180 || values[1] > 180) {
+      alert("Longitude must be between -180 and 180.");
+      setGeoreference(NaN, NaN, NaN);
+      return;
+    }
+    setGeoreference(...values);
+  }
+
   return (
     <>
       <div className="grid grid-cols-[min-content_auto] gap-3 items-center">
@@ -398,24 +458,27 @@ function ReferenceInput({ longitude, latitude, height, setLongitude, setLatitude
         <div>
           <input
             className="input input-bordered w-full"
-            value={latitude}
-            onChange={(event) => setLatitude(parseFloat(event.target.value || "0"))}
+            value={latitudeText}
+            onChange={(event) => setLatitudeText(event.target.value)}
+            onBlur={commitReferenceValues}
           />
         </div>
         <div className="text-nowrap">Ref. longitude:</div>
         <div>
           <input
             className="input input-bordered w-full"
-            value={longitude}
-            onChange={(event) => setLongitude(parseFloat(event.target.value || "0"))}
+            value={longitudeText}
+            onChange={(event) => setLongitudeText(event.target.value)}
+            onBlur={commitReferenceValues}
           />
         </div>
         <div className="text-nowrap">Ref. height:</div>
         <div>
           <input
             className="input input-bordered w-full"
-            value={height}
-            onChange={(event) => setHeight(parseFloat(event.target.value || "0"))}
+            value={heightText}
+            onChange={(event) => setHeightText(event.target.value)}
+            onBlur={commitReferenceValues}
           />
         </div>
       </div>
@@ -423,18 +486,27 @@ function ReferenceInput({ longitude, latitude, height, setLongitude, setLatitude
   );
 }
 
-function ReferenceMouse({ enabled, setEnabled }) {
+function formatReferenceValue(value) {
+  return Number.isFinite(value) ? String(value) : "NaN";
+}
+
+function ReferenceMouse({ enabled, setEnabled, onClear }) {
   return (
     <>
-      <label className="label cursor-pointer justify-start gap-3">
-        <input
-          type="checkbox"
-          className="checkbox"
-          checked={enabled}
-          onChange={(event) => setEnabled(event.target.checked)}
-        />
-        <span>Set reference origin with mouse click</span>
-      </label>
+      <div className="flex items-center gap-3">
+        <button type="button" className="btn btn-sm" onClick={onClear}>
+          Clear
+        </button>
+        <label className="label cursor-pointer justify-start gap-3">
+          <input
+            type="checkbox"
+            className="checkbox"
+            checked={enabled}
+            onChange={(event) => setEnabled(event.target.checked)}
+          />
+          <span>Set origin with mouse click</span>
+        </label>
+      </div>
     </>
   );
 }

@@ -42,10 +42,6 @@ AUTH_FUSIONAUTH_ISSUER=
 # URL of mapbuilder to fetch the maps
 MAPBUILDER_URL=
 
-# Default start location
-NEXT_PUBLIC_DEFAULT_LATITUDE=
-NEXT_PUBLIC_DEFAULT_LONGITUDE=
-NEXT_PUBLIC_DEFAULT_HEIGHT=
 ```
 
 2. Generate Auth.js secret (must be the same for MapBuilder and MapAligner)

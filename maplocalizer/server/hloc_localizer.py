@@ -337,6 +337,7 @@ class HlocLocalizer(BaseLocalizer):
 
 
     def load_map_transform(self, map_transform_path: Path, map_id: str):
+        """Load ``transform.json`` for ``map_id``. Raises on any failure (missing file, bad JSON, invalid content)."""
         mid = str(map_id)
         if self.map_id and mid != self.map_id:
             raise ValueError(
@@ -347,10 +348,8 @@ class HlocLocalizer(BaseLocalizer):
                 data = json.load(file)
                 self.map_transform_info = MapTransformInfo.from_transform_json(data, mid)
             print(f"Successfully loaded map transform from {map_transform_path}")
-            return True
         except Exception as ex:
-            print(f"Could not load map transform from {map_transform_path}: {ex}")
-            return False
+            raise RuntimeError(f"Could not load map transform from {map_transform_path}: {ex}") from ex
 
 
     def export_map(self):

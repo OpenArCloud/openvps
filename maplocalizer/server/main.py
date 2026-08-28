@@ -55,6 +55,29 @@ def get_settings():
 _dds_runtime = None
 _dds_worker = None
 _dds_heartbeat = None
+_dds_announcer = None
+
+
+def _dds_announce_current() -> None:
+    """
+    Re-advertise whichever map the DDS path now serves.
+
+    Called after every load and unload, because the announce has to follow currentMapId:
+    VpsRequest has no map field, so the DDS path answers from currentMapId, and announcing
+    any other map would advertise one this service will not localize against. A map with no
+    geodetic anchor is not announced at all — see ServiceAnnouncer.set_map.
+    """
+    if _dds_announcer is None:
+        return
+    try:
+        if currentMapId == kDummyMapId or currentMapId not in localizers:
+            _dds_announcer.clear()
+        else:
+            _dds_announcer.set_map(currentMapId, localizers[currentMapId])
+    except Exception:
+        # Discovery is not worth failing a map load over: the map is still servable to a
+        # client that names it, and the next load retries.
+        traceback.print_exc()
 
 
 def _dds_localize(image_bytes, request):
@@ -105,7 +128,7 @@ def _dds_localize(image_bytes, request):
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    global _dds_runtime, _dds_worker, _dds_heartbeat
+    global _dds_runtime, _dds_worker, _dds_heartbeat, _dds_announcer
     from spatialdds import runtime as _rt
     if _rt.enabled():
         try:
@@ -119,8 +142,16 @@ async def _lifespan(app: FastAPI):
                 _os.environ.get("OPENVPS_SERVICE_ID", "svc:vps:openvps/local;v=dev"),
                 lambda img, req: _dds_worker.run(_dds_localize, img, req),
             )
-            _dds_runtime = _rt.DdsRuntime(service)
+            from spatialdds.announce import ServiceAnnouncer
+            _dds_announcer = ServiceAnnouncer(
+                participant,
+                _os.environ.get("OPENVPS_SERVICE_ID", "svc:vps:openvps/local"),
+                _os.environ.get("OPENVPS_ORG", "openvps"),
+            )
+            _dds_runtime = _rt.DdsRuntime(service, announcer=_dds_announcer)
             _dds_runtime.start()
+            # A map may already be loaded if this is a restart with a warm pool.
+            _dds_announce_current()
         except Exception:
             # A DDS failure must not stop the HTTP service coming up. The localizer is
             # useful without it, and a half-started process that serves neither is worse.
@@ -208,6 +239,7 @@ def load_map_core(map_id: str) -> Tuple[bool, str]:
     if map_id in mapConfigs and map_id in localizers:
         currentMapId = map_id
         _touch_map(map_id)
+        _dds_announce_current()
         return True, ""
 
     limit = settings.maxLoadedMaps
@@ -238,6 +270,7 @@ def load_map_core(map_id: str) -> Tuple[bool, str]:
         localizers[map_id] = localizer
         currentMapId = map_id
         _touch_map(map_id)
+        _dds_announce_current()
         return True, ""
     except Exception as ex:
         if map_id in mapConfigs:
@@ -316,6 +349,12 @@ async def unload_map(id: str):
     if id in localizers:
         del localizers[id]
     access_times.pop(id, None)
+    global currentMapId
+    if currentMapId == id:
+        # Nothing else is implicitly current: leaving it pointing at an unloaded map would
+        # have the announce advertise a map that is gone.
+        currentMapId = kDummyMapId
+    _dds_announce_current()
     return {"STATUS": f"Unloaded map {id}"}
 
 

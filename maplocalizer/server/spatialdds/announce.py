@@ -187,3 +187,144 @@ def build_announce(
         "ttl_sec": int(ttl_sec),
         "coverage_source_ids": [],
     }
+
+
+class ServiceAnnouncer:
+    """
+    Publishes the announce for whichever map the DDS path currently serves, and only then.
+
+    One announce, not one per loaded map. Several maps can be resident since upstream added
+    the LRU pool, but `VpsRequest` has no map field, so the DDS path answers from
+    `currentMapId` and announcing anything else would advertise a map this service will not
+    localize against. Announcing the map it actually serves is the only honest option.
+
+    `service_id` follows the spec's persistent/revision split (Appendix F): the base is the
+    stable identifier a client pins on, and `;v=<map_id>` makes each map a comparable
+    revision of it. Since `Announce` is keyed on the whole string, swapping maps disposes one
+    instance and creates another — which is what a keyed announce with dispose is for, and
+    why the two are legibly the same service at two revisions rather than two services.
+    """
+
+    def __init__(self, participant, service_id_base: str, org: str,
+                 *, pad_m: float = DEFAULT_COVERAGE_PAD_M, ttl_sec: int = DEFAULT_TTL_SEC):
+        from spatialdds_demo import typed_transport as tt
+        from spatialdds_idl.spatial.disco import Announce
+
+        self._Announce = Announce
+        self._tt = tt
+        self._base = service_id_base.split(";", 1)[0]
+        self._org = org
+        self._pad_m = pad_m
+        self._ttl = ttl_sec
+        self._writer = tt.make_writer(
+            participant, TOPIC_ANNOUNCE, Announce, QOS_ANNOUNCE, lifespan_sec=float(ttl_sec))
+        self._current = None          # (service_id, Announce sample) or None
+        self._last_refresh = 0.0
+
+    def service_id_for(self, map_id: str) -> str:
+        return f"{self._base};v={map_id}"
+
+    def set_map(self, map_id: str, localizer) -> bool:
+        """
+        Announce ``map_id``. Returns False when it is not announceable and says why.
+
+        Not announceable means no geodetic anchor: since b2dff1f a map gets metric scale
+        during mapping but stays ungeoreferenced until someone georeferences it, and coverage
+        in 1.7 is entirely geographic. Such a map is localizable and has no position on
+        Earth, so there is nothing truthful to advertise. It stays usable over HTTP and to a
+        client that already knows it.
+        """
+        import time as _t
+        from spatialdds_demo.json_mapping import from_json
+
+        mt = getattr(localizer, "map_transform_info", None)
+        if mt is None or mt.geodetic_ref is None:
+            log.info("map %s has no geodetic anchor; not announcing it", map_id)
+            self.clear()
+            return False
+
+        bbox = coverage_bbox_wgs84(
+            localizer.reconstruction, mt.map_to_enu_transform, mt.geodetic_ref, self._pad_m)
+        if bbox is None:
+            log.info("map %s produced no coverage box; not announcing it", map_id)
+            self.clear()
+            return False
+
+        sid = self.service_id_for(map_id)
+        if self._current is not None and self._current[0] != sid:
+            self.clear()
+
+        scale = None
+        fr = getattr(mt, "frame_ref", None)
+        if fr is not None and getattr(fr, "has_coord_scale", False) and fr.coord_scale:
+            scale = float(fr.coord_scale.scale_factor)
+
+        payload = build_announce(
+            sid, self._org, map_id, bbox,
+            f"spatialdds://{self._org}/{map_id}/service/vps",
+            min_inliers=20, scale_factor=scale, ttl_sec=self._ttl,
+            transforms=self._map_to_enu_transform_entry(mt, map_id),
+        )
+        now = _t.time()
+        payload["stamp"] = {"sec": int(now), "nanosec": int((now % 1) * 1e9)}
+        sample = from_json(self._Announce, payload)
+        self._writer.write(sample)
+        self._current = (sid, sample)
+        self._last_refresh = now
+        log.info("announced %s covering %s", sid, bbox)
+        return True
+
+    def _map_to_enu_transform_entry(self, mt, map_id: str):
+        """
+        The map-to-earth relation, as a disco::Transform in the announce.
+
+        Deliberately not core::FrameTransform: that type has no registered topic or QoS
+        profile, and its T_parent_child runs parent-to-child with the global frame as
+        parent, i.e. the inverse of what is held here. Transform's from/to needs no
+        inversion. Rotation only — the scale is declared on the frame, so what remains is
+        rigid and fits PoseSE3.
+        """
+        import numpy as _np
+        from scipy.spatial.transform import Rotation as _R
+
+        T = _np.asarray(mt.map_to_enu_transform, dtype=float)
+        L = T[:3, :3]
+        norms = _np.linalg.norm(L, axis=0)
+        s = float(_np.mean(norms)) if _np.all(norms > 1e-12) else 1.0
+        q = _R.from_matrix(L / s).as_quat()      # scipy returns x, y, z, w
+        return [{
+            "from": {"uuid": str(map_id), "fqn": f"openvps/hloc/{map_id}/colmap_world",
+                     "has_coord_convention": True, "coord_convention": "CV"},
+            "to": {"uuid": "earth-fixed", "fqn": "earth-fixed",
+                   "has_coord_convention": True, "coord_convention": "ENU"},
+            "pose": {"t": [float(T[0, 3]), float(T[1, 3]), float(T[2, 3])],
+                     "q": [float(q[0]), float(q[1]), float(q[2]), float(q[3])]},
+            "stamp": {"sec": 0, "nanosec": 0},
+            "has_validity": False,
+            "validity": {"from": {"sec": 0, "nanosec": 0}, "seconds": 0},
+        }]
+
+    def tick(self) -> None:
+        """Re-announce at half the TTL so the Lifespan never expires under a live service."""
+        import time as _t
+        if self._current is None:
+            return
+        if _t.time() - self._last_refresh < self._ttl / 2.0:
+            return
+        self._writer.write(self._current[1])
+        self._last_refresh = _t.time()
+
+    def clear(self) -> None:
+        """Dispose the announce, so consumers see removal rather than waiting out the TTL."""
+        if self._current is None:
+            return
+        sid, sample = self._current
+        self._current = None
+        try:
+            self._tt.dispose(self._writer, sample)
+            log.info("disposed announce %s", sid)
+        except Exception:
+            log.exception("could not dispose announce %s", sid)
+
+    def depart(self) -> None:
+        self.clear()

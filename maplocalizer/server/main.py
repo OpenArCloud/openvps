@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import time
 import datetime
 import traceback
+from contextlib import asynccontextmanager
 from typing import Dict, Optional, Set, Tuple
 
 from oscp.geoposeprotocol import GeoPoseRequest, verify_version_header
@@ -31,13 +32,108 @@ from test_gpu import getGpuInfo
 import env
 from functools import lru_cache
 
+# Vendored SpatialDDS packages live beside this file rather than on the system path, so the
+# image needs no install step for them and the copy is visibly pinned. See vendor/README.md.
+import os as _os
+import sys as _sys
+_VENDOR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "vendor")
+if _VENDOR not in _sys.path:
+    _sys.path.insert(0, _VENDOR)
+
 
 @lru_cache
 def get_settings():
     return env.Settings()
 
 
-app = FastAPI()
+# --- SpatialDDS -----------------------------------------------------------------------
+# Entirely additive and off unless OPENVPS_DDS_ENABLED is set, so a deployment that does not
+# want a DDS participant behaves exactly as it did before. The HTTP path below is unchanged
+# either way: both surfaces call the same localizer through the same single worker, because
+# the GPU serialises regardless and letting two threads into HlocLocalizer would race its
+# per-call state.
+_dds_runtime = None
+_dds_worker = None
+_dds_heartbeat = None
+
+
+def _dds_localize(image_bytes, request):
+    """Adapt a VpsRequest to the localizer. Runs on the shared worker, never on the loop."""
+    import cv2 as _cv2
+    import numpy as _np
+    from spatialdds.service import LocalizeOutcome
+
+    buf = _np.frombuffer(image_bytes, dtype=_np.uint8)
+    img = _cv2.imdecode(buf, _cv2.IMREAD_COLOR_BGR)
+    if img is None:
+        return None
+
+    global currentMapId
+    if currentMapId == kDummyMapId or currentMapId not in localizers:
+        return None
+    localizer = localizers[currentMapId]
+    _touch_map(currentMapId)
+
+    # VpsRequest carries no camera intrinsics of its own, and query_stream_id would point at
+    # a VisionMeta this service does not publish, so the map's own camera model is used.
+    # That is correct for query images drawn from the map and wrong for a foreign camera —
+    # the gap is that the 1.7 request has nowhere to put intrinsics.
+    from oscp.geoposeprotocol import CameraParameters
+    cam = localizer.reconstruction.cameras[
+        next(iter(localizer.reconstruction.images.values())).camera_id]
+    prm = [float(x) for x in cam.params]
+    params = CameraParameters()
+    params.model = "PINHOLE"
+    params.modelParams = prm[:4] if len(prm) >= 4 else [prm[0], prm[0], prm[1], prm[2]]
+
+    result = localizer.localize(img, params)
+    if result is None or not result.framed_poses:
+        return None
+    if _dds_heartbeat is not None:
+        _dds_heartbeat.beat()
+    return LocalizeOutcome(
+        framed_poses=list(result.framed_poses),
+        geoposes=list(result.geoposes),
+        # Upstream does not surface the inlier ratio yet, so this is a placeholder rather
+        # than a measurement. Publishing a fabricated confidence would be worse than saying
+        # so here: see docs note on deriving it from inliers / PnP correspondences.
+        confidence=1.0 if result.geoposes or result.framed_poses else 0.0,
+        map_id=currentMapId,
+        georeferenced=bool(result.geoposes),
+    )
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    global _dds_runtime, _dds_worker, _dds_heartbeat
+    from spatialdds import runtime as _rt
+    if _rt.enabled():
+        try:
+            from cyclonedds.domain import DomainParticipant
+            from spatialdds.service import VpsService
+            _dds_worker = _rt.SharedWorker()
+            _dds_heartbeat = _rt.Heartbeat()
+            participant = DomainParticipant(_rt.domain_id())
+            service = VpsService(
+                participant,
+                _os.environ.get("OPENVPS_SERVICE_ID", "svc:vps:openvps/local;v=dev"),
+                lambda img, req: _dds_worker.run(_dds_localize, img, req),
+            )
+            _dds_runtime = _rt.DdsRuntime(service)
+            _dds_runtime.start()
+        except Exception:
+            # A DDS failure must not stop the HTTP service coming up. The localizer is
+            # useful without it, and a half-started process that serves neither is worse.
+            traceback.print_exc()
+            print("SpatialDDS participant failed to start; HTTP path unaffected")
+    yield
+    if _dds_runtime is not None:
+        _dds_runtime.stop()
+    if _dds_worker is not None:
+        _dds_worker.shutdown()
+
+
+app = FastAPI(lifespan=_lifespan)
 
 # CORS
 app.add_middleware(

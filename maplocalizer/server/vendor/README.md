@@ -4,16 +4,22 @@ Copied from `OpenArCloud/SpatialDDS-demo` at **`6f29ecf`** ("web: discover the V
 geohash, and a REST window beside the DDS one"). Do not edit these files here — the demo is
 the upstream. To take a newer version, re-copy and record the commit above.
 
+The whole `spatialdds_demo` package is vendored, not a chosen subset. Cherry-picking
+modules was tried first and was a mistake: the package's internal imports and the bridge's
+own imports between them reach most of it, and each missing module surfaced only as an
+ImportError one build later.
+
 | Path | Why it is here |
 |---|---|
 | `spatialdds_idl/` | Generated Python bindings for the SpatialDDS 1.7 IDL (`idlc -l py`). Checked in upstream, so neither `idlc` nor Docker is needed to build. |
-| `spatialdds_demo/qos_profiles.py` | The §3.3.3 QoS table as CycloneDDS `Qos`. Deadline is request/offered, so a reader asking 33 ms will not match a writer offering none — silently. |
-| `spatialdds_demo/typed_transport.py` | Topic cache, reader/writer factories, dispose. CycloneDDS rejects a second `Topic` for one name, hence the cache. |
-| `spatialdds_demo/blob.py` | `BlobChunk` chunking and reassembly at the 65,535-byte binding ceiling, with CRC32 per chunk. |
-| `spatialdds_demo/json_mapping.py` | dict ↔ typed conversion, including union handling that refuses an unknown case name. |
-| `spatialdds_demo/discovery_bus.py` | Keyed `Announce` publish/subscribe with dispose-on-depart. |
-| `spatialdds_demo/topics.py`, `topic_types.py` | Well-known topic names and the §3.3.2 registry, with the validator both sides share. |
-| `spatialdds_demo/payloads.py`, `service_bus.py` | Payload builders and the VPS/coverage service and client loops. |
+| `spatialdds_demo/` | The demo's runtime package: QoS profiles, typed transport, blob chunking, JSON mapping, discovery over bus and HTTP, the topic registry, service and client loops. |
+| `spatialdds_validation.py` | Coverage and manifest validation. Imported by `discovery_http`. |
+| `spatialdds_test.py` | **Test harness, and it should not be needed.** `bridges/web_bridge/server.py` imports `MockSensorData` from it for a `blob_ref` helper that `spatialdds_demo.blob.blob_ref` already provides. Vendored unmodified rather than patched, per the rule against forking the demo. Reported upstream. |
+
+Two of the QoS details are load-bearing and easy to undo by accident. Deadline is a
+request/offered policy, so a reader asking 33 ms does not match a writer offering none and
+the failure is silent. History is reader-side, which is why `make_reader(keep_all=True)`
+exists for reply topics whose type has no `@key`.
 
 ## Why vendored rather than a dependency
 

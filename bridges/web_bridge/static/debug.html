@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SpatialDDS Web Bridge — Debug Topic List</title>
+<style>
+  body { font-family: -apple-system, ui-sans-serif, sans-serif; margin: 1.5rem; max-width: 980px; }
+  h1 { margin: 0 0 0.5rem 0; }
+  .status { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 4px; font-size: 0.85rem; }
+  .status.ok { background: #2a8a3a; color: white; }
+  .status.bad { background: #c0392b; color: white; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+  th, td { border-bottom: 1px solid #ddd; padding: 0.3rem 0.5rem; text-align: left; vertical-align: top; }
+  th { background: #f5f5f5; }
+  .topic { font-family: ui-monospace, monospace; cursor: pointer; }
+  .topic:hover { background: #f0f0f0; }
+  pre { background: #f7f7f7; padding: 0.6rem; border-radius: 4px; overflow: auto; max-height: 320px; font-size: 0.8rem; }
+  .row { display: flex; gap: 1rem; margin: 0.5rem 0; flex-wrap: wrap; }
+  input[type=text] { padding: 0.3rem; font-family: ui-monospace, monospace; min-width: 320px; }
+  button { padding: 0.3rem 0.8rem; cursor: pointer; }
+  .small { color: #666; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<h1>SpatialDDS Web Bridge</h1>
+<div class="row">
+  <span>Status: <span id="status" class="status bad">disconnected</span></span>
+  <span class="small" id="stats"></span>
+</div>
+
+<h2>Topics</h2>
+<div class="small">Click a topic to start streaming its messages below.</div>
+<table id="topics-tbl"><thead>
+  <tr><th>Logical topic</th><th>msg_type</th><th>rate (Hz)</th><th>count</th></tr>
+</thead><tbody></tbody></table>
+
+<h2>Custom subscription</h2>
+<div class="row">
+  <input type="text" id="pattern" placeholder="spatialdds/*/sensing/detection3d/v1" value="*">
+  <button id="sub-btn">Subscribe</button>
+  <button id="unsub-btn">Unsubscribe all</button>
+</div>
+
+<h2>Latest message</h2>
+<div class="small" id="msg-meta"></div>
+<pre id="msg-body">(none yet)</pre>
+
+<script src="/static/spatialdds-ws-client.js"></script>
+<script>
+  const sdds = new SpatialDDSClient();
+  const statusEl = document.getElementById("status");
+  const statsEl = document.getElementById("stats");
+  const tbody = document.querySelector("#topics-tbl tbody");
+  const patternEl = document.getElementById("pattern");
+  const msgMeta = document.getElementById("msg-meta");
+  const msgBody = document.getElementById("msg-body");
+  let activeSubs = [];
+
+  sdds.onConnect = () => { statusEl.textContent = "connected"; statusEl.className = "status ok"; };
+  sdds.onDisconnect = () => { statusEl.textContent = "disconnected"; statusEl.className = "status bad"; };
+
+  function renderMessage(m) {
+    msgMeta.textContent = `msg_type=${m.msg_type}  topic=${m.logical_topic}  ts=${m.timestamp_ns}`;
+    msgBody.textContent = JSON.stringify(m.payload, null, 2);
+  }
+
+  async function refreshTopics() {
+    try {
+      const topics = await sdds.listTopics();
+      tbody.innerHTML = "";
+      for (const t of topics) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td class="topic">${t.logical_topic}</td><td>${t.msg_type}</td>` +
+                        `<td>${t.rate_hz}</td><td>${t.message_count}</td>`;
+        tr.querySelector(".topic").onclick = () => {
+          patternEl.value = t.logical_topic;
+          subscribe();
+        };
+        tbody.appendChild(tr);
+      }
+      const pong = await sdds.ping();
+      statsEl.textContent = `clients=${pong.clients_connected}  dispatched=${pong.messages_dispatched}`;
+    } catch (e) { /* ignore — bridge may be (re)connecting */ }
+  }
+
+  function unsubscribeAll() {
+    for (const id of activeSubs) sdds.unsubscribe(id);
+    activeSubs = [];
+  }
+
+  function subscribe() {
+    unsubscribeAll();
+    const id = sdds.subscribe(patternEl.value, renderMessage);
+    activeSubs.push(id);
+  }
+
+  document.getElementById("sub-btn").onclick = subscribe;
+  document.getElementById("unsub-btn").onclick = unsubscribeAll;
+
+  sdds.connect().then(() => {
+    refreshTopics();
+    setInterval(refreshTopics, 2500);
+  });
+</script>
+</body>
+</html>

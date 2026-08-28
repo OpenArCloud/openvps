@@ -1,0 +1,688 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SpatialDDS 1.6 — Multi-Operator Intersection</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #0a0e1a;
+                font-family: -apple-system, ui-sans-serif, sans-serif;
+                color: #e2e6f0; overflow: hidden; }
+  canvas { display: block; cursor: crosshair; }
+  a.debug-link { position: fixed; bottom: 6px; right: 12px;
+                  font-size: 11px; color: #4a5680;
+                  text-decoration: none; font-family: ui-monospace, monospace; }
+  a.debug-link:hover { color: #8a9bd0; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<a class="debug-link" href="/debug">debug topic list →</a>
+<script src="/static/spatialdds-ws-client.js"></script>
+<script>
+"use strict";
+
+// ── Palette ────────────────────────────────────────────────────────────
+const COLORS = {
+  operator_a:     { fill: "#50c878", stroke: "#3a9a5a", label: "Operator A" },
+  operator_b:     { fill: "#508cff", stroke: "#3a6acc", label: "Operator B" },
+  operator_c:     { fill: "#ffa53c", stroke: "#cc8430", label: "Operator C" },
+  infrastructure: { fill: "#dc64dc", stroke: "#aa4caa", label: "Infrastructure" },
+  fused:          { fill: "#f0f0f0", stroke: "#cccccc", label: "Fused" },
+  conflict:       { fill: "#ff2828", stroke: "#cc2020", label: "Conflict" },
+  grid:           "#1a2038",
+  background:     "#0a0e1a",
+  text:           "#a0adc4",
+  metrics_bg:     "#0f1424",
+};
+
+// Coverage circles can be hundreds of meters wide on the wire — clamp
+// the rendered radius so the canvas auto-fit stays focused on the
+// actual ±30 m crossing action. Wire payload is unmodified.
+const COVERAGE_RENDER_MAX_M = 40;
+
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+let scale = 6;       // px/m — recomputed on resize
+let cssW = 0, cssH = 0;  // logical CSS pixels (after DPR scaling)
+
+function resizeCanvas() {
+  // Hi-DPI: render at devicePixelRatio so text doesn't look fuzzy on
+  // Retina / 4K displays. Canvas backing store is dpr× the CSS size,
+  // and we ``ctx.scale(dpr, dpr)`` so all subsequent draw calls use
+  // CSS-pixel coordinates.
+  const dpr = window.devicePixelRatio || 1;
+  cssW = window.innerWidth;
+  cssH = window.innerHeight;
+  cv.style.width = cssW + "px";
+  cv.style.height = cssH + "px";
+  cv.width = Math.round(cssW * dpr);
+  cv.height = Math.round(cssH * dpr);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(dpr, dpr);
+  // View window: ±50 m fits in the smaller dimension. Tighter than the
+  // previous ±80 m default so the (0, 0) crossing action fills more
+  // of the canvas and detection boxes are legibly large.
+  const usableH = Math.max(120, cssH - 88);
+  scale = Math.min(cssW, usableH) / 100;
+}
+window.addEventListener("resize", resizeCanvas);
+resizeCanvas();
+
+function metersToCanvas(x_m, y_m) {
+  return [
+    cssW / 2 + x_m * scale,
+    cssH / 2 - y_m * scale,  // Y inverted (north = canvas up)
+  ];
+}
+
+// ── State ──────────────────────────────────────────────────────────────
+const state = {
+  operators: {},               // name → { ego, trail, detections, trajectory, coverage, color, lastSeen, messageCount }
+  fused: { tracks: [], bindings: {} },
+  conflicts: [],               // [{x, y, agents, time_to, min_dist, timestamp}]
+  metrics: { track_count: 0, multi_src: 0, improvement: 0 },
+  connected: false,
+  hoveredTrack: null,
+};
+
+function getOperator(logicalTopic) {
+  const parts = (logicalTopic || "").split("/");
+  return parts[1] || "unknown";
+}
+
+function ensureOperator(name) {
+  if (!state.operators[name]) {
+    state.operators[name] = {
+      ego: null,
+      trail: [],
+      detections: [],
+      trajectory: [],
+      coverage: null,
+      color: COLORS[name] || { fill: "#8aa", stroke: "#668", label: name },
+      lastSeen: 0,
+      messageCount: 0,
+      // Initialise rate-window so the first interval tick computes
+      // a real Hz value instead of waiting for two ticks (which
+      // briefly displayed 0.0 Hz for late-arriving operators).
+      _lastRateAt: Date.now(),
+      _lastRateCount: 0,
+      _lastRateHz: 0,
+    };
+  }
+  return state.operators[name];
+}
+
+// ── Message handlers ───────────────────────────────────────────────────
+
+// The spec's Vec3 is double[3], so it arrives as an array. The nuScenes and
+// DeepSense converters still emit the older {x,y,z} object, so read both.
+function secs(t) {
+  t = t || {};
+  return (+t.sec || 0) + (+t.nanosec || 0) / 1e9;
+}
+
+function vec(v) {
+  if (Array.isArray(v)) return { x: +v[0] || 0, y: +v[1] || 0, z: +v[2] || 0 };
+  v = v || {};
+  return { x: +v.x || 0, y: +v.y || 0, z: +v.z || 0 };
+}
+
+function onEgoPose(msg) {
+  const op = ensureOperator(getOperator(msg.logical_topic));
+  // FramedPose nests the pose inside the frame it is expressed in; the
+  // nuScenes publisher still emits a bare pose_se3.
+  let pose = (msg.payload && (msg.payload.pose_se3 || msg.payload.pose)) || {};
+  if (pose.pose) pose = pose.pose;
+  op.ego = vec(pose.t || pose.position);
+  op.trail.push([op.ego.x, op.ego.y]);
+  if (op.trail.length > 200) op.trail.shift();
+  op.lastSeen = Date.now();
+  op.messageCount++;
+}
+
+function onDetections(msg) {
+  const op = ensureOperator(getOperator(msg.logical_topic));
+  // OperatorDetectionSet composes the spec Detection3D under `detection`
+  // and adds the velocity the spec type has no field for.
+  const dets = (msg.payload && (msg.payload.dets || msg.payload.detections)) || [];
+  op.detections = dets.map(row => {
+    const d = row.detection || row;
+    const c = vec(d.center), sz = vec(d.size);
+    return {
+      x: c.x, y: c.y,
+      class_id: d.class_id || "unknown",
+      score: +d.score || 0,
+      w: sz.x || 2,
+      h: sz.y || 2,
+      det_id: d.det_id || "",
+    };
+  });
+  op.lastSeen = Date.now();
+  op.messageCount++;
+}
+
+function onTrajectory(msg) {
+  const op = ensureOperator(getOperator(msg.logical_topic));
+  const waypoints = (msg.payload && msg.payload.waypoints) || [];
+  op.trajectory = waypoints.map(wp => {
+    const t = vec((wp.pose || {}).t);
+    return {
+      x: t.x,
+      y: t.y,
+      // Presence-flagged: the value is always on the wire, the flag says
+      // whether it means anything.
+      uncertainty: wp.has_uncertainty ? (+wp.position_uncertainty_m || 1) : 1,
+      confidence: wp.has_confidence ? (+wp.confidence || 0.5) : 0.5,
+    };
+  });
+  op.messageCount++;
+}
+
+function onFusedTracks(msg) {
+  const tracks = (msg.payload && msg.payload.tracks) || [];
+  state.fused.tracks = tracks.map(t => ({
+    x: vec(t.position).x,
+    y: vec(t.position).y,
+    class_id: t.object_class || "?",
+    sources: t.source_operators || [],
+    source_count: +t.source_count || 0,
+    confidence: +t.confidence || 0,
+    track_id: t.track_id || "",
+  }));
+}
+
+function onConflict(msg) {
+  const p = msg.payload || {};
+  // A predicted trajectory conflict is published as SpatialEvent with the
+  // nearest registered type, PROXIMITY_ALERT — 1.7 has no predicted-conflict
+  // type. The conflicting pair rides in event_id ("conflict:a|b") because
+  // SpatialEvent's trigger/secondary slots are det/track ids and its generic
+  // attributes field is a JSON string this demo will not put on the bus.
+  if (p.type && p.type !== "PROXIMITY_ALERT") return;
+  const pos = p.has_position ? vec(p.position) : vec(p.conflict_position);
+  const agents = p.agents
+    || String(p.event_id || "").split(":").pop().split("|").filter(Boolean);
+  state.conflicts.push({
+    x: pos.x,
+    y: pos.y,
+    agents: agents,
+    // Lead time without an extension field: event_start is when the
+    // conflict is predicted to occur, stamp is when the prediction was
+    // made, so the difference is the ETA.
+    time_to: p.time_to_conflict != null
+      ? +p.time_to_conflict
+      : Math.max(0, secs(p.event_start) - secs(p.stamp)),
+    min_dist: +p.measured_distance_m || +p.min_distance_m || 0,
+    timestamp: Date.now(),
+  });
+  // Keep last 5 conflicts, age out after 10 s.
+  state.conflicts = state.conflicts
+    .filter(c => Date.now() - c.timestamp < 10000)
+    .slice(-5);
+}
+
+function onCoverage(msg) {
+  const m = (msg.payload && (msg.payload.metrics || msg.payload)) || {};
+  state.metrics.track_count = +m.track_count || +m.tracks || 0;
+  state.metrics.multi_src   = +m.multi_source_count || +m.multi_src || 0;
+  // Prefer ``coverage_improvement_excl_infra`` — n / max(per_op count,
+  // excluding the infrastructure radar). The legacy
+  // ``coverage_improvement`` (n / best_single) collapses to 1.0× when
+  // one sensor sees every shared object, which is the demo's reality.
+  state.metrics.improvement =
+       +m.coverage_improvement_excl_infra
+    || +m.coverage_improvement
+    || +m.improvement
+    || 0;
+}
+
+function onBinding(msg) {
+  const p = msg.payload || {};
+  if (!p.entity_id) return;
+  state.fused.bindings[p.entity_id] = {
+    entity_class: p.entity_class || "?",
+    components: p.components || [],
+  };
+}
+
+function onAnnounce(msg) {
+  const op = ensureOperator(getOperator(msg.logical_topic));
+  // Announce.coverage is a spec CoverageElement list. CoverageElement has no
+  // circle, so a circular area arrives as its bounding aabb in local metres;
+  // centre and half-width give the circle back.
+  const elements = (msg.payload && msg.payload.coverage) || [];
+  const element = elements.find((e) => e && e.has_aabb && e.aabb);
+  if (!element) return;
+  const lo = element.aabb.min_xyz || [0, 0, 0];
+  const hi = element.aabb.max_xyz || [0, 0, 0];
+  op.coverage = {
+    cx: (lo[0] + hi[0]) / 2,
+    cy: (lo[1] + hi[1]) / 2,
+    radius: Math.min((hi[0] - lo[0]) / 2 || 50, COVERAGE_RENDER_MAX_M),
+  };
+}
+
+// ── Draw layer ─────────────────────────────────────────────────────────
+function drawGrid() {
+  ctx.strokeStyle = COLORS.grid;
+  ctx.lineWidth = 0.5;
+  for (let m = -120; m <= 120; m += 10) {
+    const [x] = metersToCanvas(m, 0);
+    const [, y] = metersToCanvas(0, m);
+    if (x >= 0 && x <= cssW) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, cssH); ctx.stroke();
+    }
+    if (y >= 0 && y <= cssH) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cssW, y); ctx.stroke();
+    }
+  }
+  // Origin axis lines slightly brighter.
+  ctx.strokeStyle = "#26305a";
+  ctx.lineWidth = 1;
+  const [ox] = metersToCanvas(0, 0);
+  const [, oy] = metersToCanvas(0, 0);
+  ctx.beginPath(); ctx.moveTo(ox, 0); ctx.lineTo(ox, cssH); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, oy); ctx.lineTo(cssW, oy); ctx.stroke();
+  ctx.fillStyle = "#3a4470";
+  ctx.font = "10px ui-monospace, monospace";
+  ctx.fillText("N", ox + 4, 56);
+  ctx.fillText("E", cssW - 14, oy - 4);
+}
+
+function drawCoverage() {
+  for (const [name, op] of Object.entries(state.operators)) {
+    if (!op.coverage) continue;
+    const [cx, cy] = metersToCanvas(op.coverage.cx, op.coverage.cy);
+    const r = op.coverage.radius * scale;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.strokeStyle = op.color.fill + "40";  // very faint
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+}
+
+function drawTrails() {
+  for (const op of Object.values(state.operators)) {
+    if (op.trail.length < 2) continue;
+    ctx.beginPath();
+    const [sx, sy] = metersToCanvas(op.trail[0][0], op.trail[0][1]);
+    ctx.moveTo(sx, sy);
+    for (let i = 1; i < op.trail.length; i++) {
+      const [px, py] = metersToCanvas(op.trail[i][0], op.trail[i][1]);
+      ctx.lineTo(px, py);
+    }
+    ctx.strokeStyle = op.color.fill + "60";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+}
+
+function drawDetections() {
+  for (const op of Object.values(state.operators)) {
+    for (const det of op.detections) {
+      const [cx, cy] = metersToCanvas(det.x, det.y);
+      const w = Math.max(4, det.w * scale);
+      const h = Math.max(4, det.h * scale);
+      const a = Math.max(0, Math.min(255, Math.floor(40 + 180 * det.score)));
+      const alpha = a.toString(16).padStart(2, "0");
+      ctx.fillStyle = op.color.fill + alpha;
+      ctx.strokeStyle = op.color.stroke;
+      ctx.lineWidth = 1;
+      ctx.fillRect(cx - w / 2, cy - h / 2, w, h);
+      ctx.strokeRect(cx - w / 2, cy - h / 2, w, h);
+      // No per-detection class label — they overlap heavily at the
+      // crossing centre. Class shows on the fused track diamond, which
+      // is the one entity per object the operator actually cares about.
+    }
+  }
+}
+
+function drawArrowhead(x, y, angleRad, size, color) {
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x - size * Math.cos(angleRad - 0.4),
+              y - size * Math.sin(angleRad - 0.4));
+  ctx.lineTo(x - size * Math.cos(angleRad + 0.4),
+              y - size * Math.sin(angleRad + 0.4));
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+function drawTrajectories() {
+  for (const op of Object.values(state.operators)) {
+    if (!op.trajectory.length || !op.ego) continue;
+    const [sx, sy] = metersToCanvas(op.ego.x, op.ego.y);
+
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.setLineDash([8, 6]);
+    for (const wp of op.trajectory) {
+      const [wx, wy] = metersToCanvas(wp.x, wp.y);
+      ctx.lineTo(wx, wy);
+    }
+    ctx.strokeStyle = op.color.fill + "90";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    for (const wp of op.trajectory) {
+      const [wx, wy] = metersToCanvas(wp.x, wp.y);
+      const r = Math.max(2, wp.uncertainty * scale);
+      ctx.beginPath();
+      ctx.arc(wx, wy, r, 0, Math.PI * 2);
+      ctx.fillStyle = op.color.fill + "15";
+      ctx.fill();
+    }
+
+    if (op.trajectory.length >= 2) {
+      const last = op.trajectory[op.trajectory.length - 1];
+      const prev = op.trajectory[op.trajectory.length - 2];
+      const [lx, ly] = metersToCanvas(last.x, last.y);
+      const angle = Math.atan2(
+        -(last.y - prev.y),  // canvas Y inverted
+        last.x - prev.x,
+      );
+      drawArrowhead(lx, ly, angle, 10, op.color.fill + "c0");
+    }
+  }
+}
+
+function drawFusedTracks() {
+  // Greedy label de-clutter: a track only gets a label if the closest
+  // already-labeled track is at least ``minLabelGapM`` metres away.
+  // The hovered track always wins regardless of distance — that's the
+  // user's escape hatch when many tracks pile up at the crossing.
+  const minLabelGapM = 2.0;
+  const labeled = [];   // [{x, y}, ...]
+  for (const t of state.fused.tracks) {
+    const [cx, cy] = metersToCanvas(t.x, t.y);
+    const r = 7;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r, cy);
+    ctx.lineTo(cx, cy + r); ctx.lineTo(cx - r, cy);
+    ctx.closePath();
+    const a = Math.max(0, Math.min(255, Math.floor(120 + 135 * t.confidence)));
+    const alpha = a.toString(16).padStart(2, "0");
+    ctx.fillStyle = COLORS.fused.fill + alpha;
+    ctx.fill();
+    const isHovered = (t.track_id === state.hoveredTrack);
+    ctx.strokeStyle = isHovered ? "#ffd060" : COLORS.fused.stroke;
+    ctx.lineWidth = isHovered ? 2 : 1.5;
+    ctx.stroke();
+
+    let showLabel = isHovered;
+    if (!showLabel) {
+      let closeNeighbour = false;
+      for (const p of labeled) {
+        const dx = t.x - p.x, dy = t.y - p.y;
+        if (dx * dx + dy * dy < minLabelGapM * minLabelGapM) {
+          closeNeighbour = true;
+          break;
+        }
+      }
+      showLabel = !closeNeighbour;
+    }
+    if (showLabel) {
+      ctx.fillStyle = isHovered ? "#fff5d0" : "#ccc";
+      ctx.font = isHovered ? "bold 10px ui-monospace, monospace"
+                            : "9px ui-monospace, monospace";
+      const cls = (t.class_id || "?").split(".").pop();
+      ctx.fillText(`${cls} [${t.source_count}]`, cx + r + 4, cy + 3);
+      labeled.push({ x: t.x, y: t.y });
+    }
+  }
+}
+
+function drawHoverAttribution() {
+  if (!state.hoveredTrack) return;
+  const track = state.fused.tracks.find(t => t.track_id === state.hoveredTrack);
+  if (!track) return;
+  const binding = state.fused.bindings[`entity_${state.hoveredTrack}`];
+  if (!binding) return;
+  const [tx, ty] = metersToCanvas(track.x, track.y);
+  const labels = [];
+  for (const c of binding.components || []) {
+    const topic = c.topic || "";
+    if (!topic.includes("/sensing/detection3d/")) continue;
+    const op = topic.split("/")[1];
+    const opState = state.operators[op];
+    if (!opState) continue;
+    // Find the detection by det_id; if missing, fall back to the operator ego.
+    const matchDet = (opState.detections || []).find(d => d.det_id === c.key);
+    let lx = null, ly = null;
+    if (matchDet) {
+      [lx, ly] = metersToCanvas(matchDet.x, matchDet.y);
+    } else if (opState.ego) {
+      [lx, ly] = metersToCanvas(opState.ego.x, opState.ego.y);
+    }
+    if (lx === null) continue;
+    ctx.beginPath();
+    ctx.moveTo(tx, ty); ctx.lineTo(lx, ly);
+    ctx.strokeStyle = "rgba(180,180,200,0.6)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    labels.push(`${op}:${c.key}`);
+  }
+  // Tooltip
+  if (labels.length) {
+    const text = `${track.class_id} ← ${labels.join(", ")}`;
+    ctx.font = "11px ui-monospace, monospace";
+    const wpx = ctx.measureText(text).width + 12;
+    ctx.fillStyle = "rgba(20,28,52,0.92)";
+    ctx.fillRect(tx + 12, ty - 28, wpx, 20);
+    ctx.fillStyle = "#e2e6f0";
+    ctx.fillText(text, tx + 18, ty - 14);
+  }
+}
+
+function drawConflicts() {
+  const now = Date.now();
+  for (const c of state.conflicts) {
+    const age = (now - c.timestamp) / 1000;
+    if (age > 10) continue;
+    const [cx, cy] = metersToCanvas(c.x, c.y);
+    const pulse = 1 + 0.3 * Math.sin(now / 150);
+    const r = 16 * pulse;
+    const fade = Math.max(0, 1 - age / 10);
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255,40,40,${0.30 * fade})`;
+    ctx.fill();
+    ctx.strokeStyle = `rgba(255,40,40,${0.85 * fade})`;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(cx - 7, cy - 7); ctx.lineTo(cx + 7, cy + 7);
+    ctx.moveTo(cx + 7, cy - 7); ctx.lineTo(cx - 7, cy + 7);
+    ctx.strokeStyle = `rgba(255,40,40,${fade})`;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    ctx.fillStyle = `rgba(255,90,90,${fade})`;
+    ctx.font = "bold 11px sans-serif";
+    ctx.fillText(`CONFLICT ${(c.agents || []).join("×")}`, cx + r + 4, cy - 4);
+    ctx.font = "10px ui-monospace, monospace";
+    ctx.fillText(`${c.min_dist.toFixed(1)} m | ETA ${c.time_to.toFixed(1)} s`,
+                  cx + r + 4, cy + 10);
+  }
+}
+
+function drawEgos() {
+  for (const [name, op] of Object.entries(state.operators)) {
+    if (!op.ego) continue;
+    const [cx, cy] = metersToCanvas(op.ego.x, op.ego.y);
+    ctx.beginPath();
+    ctx.arc(cx, cy, 8, 0, Math.PI * 2);
+    ctx.fillStyle = op.color.fill;
+    ctx.fill();
+    ctx.strokeStyle = op.color.stroke;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = op.color.fill;
+    ctx.font = "bold 11px sans-serif";
+    ctx.fillText(op.color.label || name, cx + 12, cy + 4);
+  }
+}
+
+function drawTitleBar() {
+  const h = 40;
+  ctx.fillStyle = COLORS.metrics_bg;
+  ctx.fillRect(0, 0, cssW, h);
+  ctx.strokeStyle = "#1a2038";
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, h); ctx.lineTo(cssW, h); ctx.stroke();
+
+  ctx.fillStyle = "#e2e6f0";
+  ctx.font = "bold 14px sans-serif";
+  ctx.fillText("SpatialDDS 1.6 — Multi-Operator Intersection", 16, 26);
+
+  ctx.beginPath();
+  ctx.arc(cssW - 18, 20, 5, 0, Math.PI * 2);
+  ctx.fillStyle = state.connected ? "#50c878" : "#ff4444";
+  ctx.fill();
+
+  const nOps = Object.keys(state.operators).length;
+  ctx.fillStyle = COLORS.text;
+  ctx.font = "11px ui-monospace, monospace";
+  ctx.textAlign = "right";
+  ctx.fillText(`${nOps} operators`, cssW - 32, 24);
+  ctx.textAlign = "start";
+}
+
+function drawMetricsBar() {
+  const barH = 48;
+  const y = cssH - barH;
+  ctx.fillStyle = COLORS.metrics_bg;
+  ctx.fillRect(0, y, cssW, barH);
+  ctx.strokeStyle = "#1a2038";
+  ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cssW, y); ctx.stroke();
+
+  const m = state.metrics;
+  const nConflicts = state.conflicts.filter(c => Date.now() - c.timestamp < 10000).length;
+  const pct = m.track_count
+    ? Math.round(100 * m.multi_src / m.track_count)
+    : 0;
+  const headline = [
+    `tracks: ${m.track_count}`,
+    `multi-src: ${m.multi_src}/${m.track_count} (${pct}%)`,
+    `vs best AV: ${(m.improvement || 0).toFixed(1)}×`,
+    nConflicts > 0
+      ? `⚠ ${nConflicts} conflict${nConflicts > 1 ? "s" : ""}`
+      : "✓ no conflicts",
+  ];
+  let tx = 16;
+  ctx.font = "12px ui-monospace, monospace";
+  for (const text of headline) {
+    ctx.fillStyle = text.startsWith("⚠") ? "#ff6464" : COLORS.text;
+    ctx.fillText(text, tx, y + 20);
+    tx += ctx.measureText(text).width + 24;
+  }
+
+  // Per-operator rates (computed from messageCount over a 1 s window).
+  ctx.fillStyle = "#666c80";
+  ctx.font = "10px ui-monospace, monospace";
+  tx = 16;
+  for (const [name, op] of Object.entries(state.operators)) {
+    const rate = op._lastRateHz || 0;
+    const c = (COLORS[name] || op.color).fill;
+    ctx.fillStyle = c;
+    ctx.fillText(`${name}`, tx, y + 38);
+    tx += ctx.measureText(`${name}`).width + 4;
+    ctx.fillStyle = "#666c80";
+    const t = `: ${rate.toFixed(1)} Hz`;
+    ctx.fillText(t, tx, y + 38);
+    tx += ctx.measureText(t).width + 18;
+  }
+}
+
+// Recompute per-operator Hz once a second.
+setInterval(() => {
+  const now = Date.now();
+  for (const op of Object.values(state.operators)) {
+    if (op._lastRateAt) {
+      const dt = (now - op._lastRateAt) / 1000;
+      op._lastRateHz = (op.messageCount - (op._lastRateCount || 0)) / Math.max(0.001, dt);
+    }
+    op._lastRateAt = now;
+    op._lastRateCount = op.messageCount;
+  }
+}, 1000);
+
+// ── Hover ──────────────────────────────────────────────────────────────
+cv.addEventListener("mousemove", (e) => {
+  const rect = cv.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  state.hoveredTrack = null;
+  for (const t of state.fused.tracks) {
+    const [cx, cy] = metersToCanvas(t.x, t.y);
+    if (Math.abs(mx - cx) < 12 && Math.abs(my - cy) < 12) {
+      state.hoveredTrack = t.track_id;
+      break;
+    }
+  }
+});
+
+// ── Main render loop ───────────────────────────────────────────────────
+function render() {
+  ctx.fillStyle = COLORS.background;
+  ctx.fillRect(0, 0, cssW, cssH);
+  drawGrid();
+  drawCoverage();
+  drawTrails();
+  drawDetections();
+  drawTrajectories();
+  drawFusedTracks();
+  drawHoverAttribution();
+  drawConflicts();
+  drawEgos();
+  drawTitleBar();
+  drawMetricsBar();
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+
+// ── WebSocket subscriptions ────────────────────────────────────────────
+const sdds = new SpatialDDSClient();
+sdds.onConnect = () => { state.connected = true; };
+sdds.onDisconnect = () => { state.connected = false; };
+
+function resubscribeAll() {
+  // No maxRateHz: the bridge's rate cap is per-subscription, NOT per
+  // (subscription, logical_topic) — with 3+ operators sharing one
+  // pattern, a 10 Hz cap means the first operator each cycle wins and
+  // the others get silently dropped. That manifested as operator_b/c
+  // showing 0 Hz in the metrics bar and PlannedTrajectory dashed lines
+  // never appearing for two of the three operators. Browser can handle
+  // 30+ Hz comfortably; let it all through.
+  sdds.subscribe("spatialdds/*/sensing/detection3d/v1", onDetections,
+                  { id: "dets" });
+  sdds.subscribe("spatialdds/*/ego/pose/v1", onEgoPose, { id: "ego" });
+  sdds.subscribe("spatialdds/platform/fusion/track/v1", onFusedTracks,
+                  { id: "fused" });
+  sdds.subscribe("spatialdds/*/plan/*/trajectory/v1", onTrajectory,
+                  { id: "plan" });
+  sdds.subscribe("spatialdds/platform/events/trajectory_conflict/v1",
+                  onConflict, { id: "conflict" });
+  sdds.subscribe("spatialdds/platform/fusion/coverage/v1", onCoverage,
+                  { id: "coverage" });
+  sdds.subscribe("spatialdds/platform/entity/binding/v1", onBinding,
+                  { id: "binding" });
+  sdds.subscribe("spatialdds/*/discovery/announce/v1", onAnnounce,
+                  { id: "announce" });
+}
+
+sdds.onConnect = () => {
+  state.connected = true;
+  resubscribeAll();
+};
+sdds.onDisconnect = () => { state.connected = false; };
+
+sdds.connect().catch(err => console.error("SpatialDDS WS connect failed", err));
+</script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+events
+event_state_enum
+event_type_enum
+severity_enum
+zone_kind_enum
+

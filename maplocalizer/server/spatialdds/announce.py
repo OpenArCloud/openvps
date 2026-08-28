@@ -159,7 +159,10 @@ def build_announce(
         "coverage": [{
             "has_crs": True, "crs": "EPSG:4326",
             "has_bbox": True, "bbox": list(bbox),
-            "has_aabb": False, "aabb": [0.0] * 6,
+            # Aabb3 is a struct of two Vec3, not a flat six-element array. A list of
+            # six serialises to nothing useful and fails at write time, not at build.
+            "has_aabb": False,
+            "aabb": {"min_xyz": [0.0, 0.0, 0.0], "max_xyz": [0.0, 0.0, 0.0]},
             "has_circle": False,
             "circle_center": [0.0, 0.0, 0.0],
             "circle_radius_m": 0.0,

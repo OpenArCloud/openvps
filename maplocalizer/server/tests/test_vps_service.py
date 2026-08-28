@@ -119,7 +119,9 @@ class VpsBinding(unittest.TestCase):
         r = self._pump(qid)
         self.assertIsNotNone(r, "no reply within the window")
         self.assertEqual(r.status, VpsStatus.VPS_SUCCESS)
-        self.assertEqual(r.service_id, SERVICE_ID)
+        # The reply names the persistent identifier when the service knows no revision,
+        # and base;v=<map> when it does. This service has no revision hook, so base.
+        self.assertEqual(r.service_id, SERVICE_ID.split(";")[0])
         self.assertTrue(r.has_node_geo)
         self.assertAlmostEqual(r.confidence, 0.83, places=5)
         self.assertFalse(r.has_rmse_m, "no covariance available, so none should be claimed")
@@ -154,6 +156,26 @@ class VpsBinding(unittest.TestCase):
         self.assertEqual(r.status, VpsStatus.VPS_SUCCESS)
         self.assertFalse(r.node_geo.has_geopose)
         self.assertTrue(r.node_geo.poses, "the FramedPose is the whole of the answer here")
+
+    def test_discovered_versioned_id_is_answered(self):
+        """
+        The announce advertises base;v=<map>, so a discovering client sends that back.
+
+        Rejecting it was a real bug found on AWS: discovery worked, the service worked, and
+        no request from a client that had actually discovered the service was ever answered
+        — 45 seconds of silence with no error on either side.
+        """
+        qid = self._send(service_id=SERVICE_ID)
+        self.assertIsNotNone(self._pump(qid),
+                             "a client echoing the advertised service_id got no reply")
+
+    def test_wrong_revision_is_refused_not_ignored(self):
+        """Asking for a map this service is not serving gets an answer, not a timeout."""
+        self.service._current_revision = lambda: "someothermap"
+        qid = self._send(service_id=f"{SERVICE_ID.split(';')[0]};v=notloaded")
+        r = self._pump(qid, seconds=5.0)
+        self.assertIsNotNone(r, "a request for an unserved map must be refused, not dropped")
+        self.assertEqual(r.status, VpsStatus.VPS_FAILED)
 
     def test_request_for_another_service_is_ignored(self):
         qid = self._send(service_id="svc:vps:someone/else;v=1")

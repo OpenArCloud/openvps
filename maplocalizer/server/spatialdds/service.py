@@ -113,8 +113,12 @@ class VpsService:
         *,
         assembly_timeout_s: float = DEFAULT_ASSEMBLY_TIMEOUT_S,
         max_pending: int = DEFAULT_MAX_PENDING,
+        current_revision: Optional[Callable[[], Optional[str]]] = None,
     ):
-        self.service_id = service_id
+        # The persistent identifier, without any ;v= suffix. The announce carries the
+        # versioned form; see _addressed_to_us.
+        self.service_id = service_id.split(";", 1)[0]
+        self._current_revision = current_revision
         self._localize = localize_fn
         self._assembly_timeout = assembly_timeout_s
         self._max_pending = max_pending
@@ -161,11 +165,56 @@ class VpsService:
                 if not claimed:
                     self._park_blob(chunk.blob_id, data)
 
+    def _addressed_to_us(self, service_id: str) -> bool:
+        """
+        Whether a request naming ``service_id`` is ours to answer.
+
+        Appendix F splits an identifier in two: without ``;v=`` it is a persistent
+        identifier, with it an immutable revision. The announce advertises the revision —
+        base plus the map id — because that is what a client should pin. So a client that
+        discovers this service and echoes back what it discovered sends the *versioned*
+        form, and comparing it against the bare configured id rejects every discovered
+        client. That happened: discovery worked, the service worked, and no request from a
+        discovering client was ever answered, with no error on either side.
+
+        Both forms are accepted, and the version is used for what it is actually good for:
+
+        - empty        -> addressed to whoever is listening
+        - base         -> whatever revision you are serving
+        - base;v=<map> -> specifically that map; served only if it is the one loaded
+
+        The last case is the map-mismatch rejection the contract asks for, without needing a
+        field VpsRequest does not have.
+        """
+        if not service_id:
+            return True
+        base, _, revision = service_id.partition(";v=")
+        if base != self.service_id:
+            return False
+        if not revision:
+            return True
+        current = self._current_revision() if self._current_revision else None
+        return current is None or revision == current
+
+    def _reply_service_id(self) -> str:
+        """
+        The identifier a reply carries: the revision that actually answered, when known.
+
+        A client can then tell which map produced the pose without parsing the frame
+        reference, and can notice the service moved on between request and reply.
+        """
+        current = self._current_revision() if self._current_revision else None
+        return f"{self.service_id};v={current}" if current else self.service_id
+
     def _take_requests(self) -> None:
         for req in tt.take_samples(self._requests):
-            if req.service_id and req.service_id != self.service_id:
-                # Addressed to a different VPS on the same partition. Not ours to answer,
-                # and not an error — several services legitimately share the topic.
+            if not self._addressed_to_us(req.service_id):
+                # Either another VPS on this partition, or this one asked for a map it is
+                # not serving. The first is not an error; the second is, and the client is
+                # told so rather than left to time out.
+                base, _, rev = req.service_id.partition(";v=")
+                if base == self.service_id and rev:
+                    self._reply_failed(req, f"map {rev} is not loaded")
                 continue
             needed = [b.blob_id for b in req.query_blobs if b.role == ROLE_QUERY_IMAGE]
             if not needed:
@@ -238,7 +287,7 @@ class VpsService:
         self._replies.write(
             VpsResponse(
                 query_id=req.query_id,
-                service_id=self.service_id,
+                service_id=self._reply_service_id(),
                 status=VpsStatus.VPS_FAILED,
                 has_node_geo=False,
                 node_geo=_empty_node_geo(),
@@ -260,7 +309,7 @@ class VpsService:
             poses=poses,
             has_geopose=has_geo,
             geopose=_geopose_to_idl(outcome.geoposes[0], stamp) if has_geo else _empty_geopose(),
-            source_id=self.service_id,
+            source_id=self._reply_service_id(),
             seq=0,
             graph_epoch=0,
         )
@@ -269,7 +318,7 @@ class VpsService:
         self._replies.write(
             VpsResponse(
                 query_id=req.query_id,
-                service_id=self.service_id,
+                service_id=self._reply_service_id(),
                 status=VpsStatus.VPS_DEGRADED if degraded else VpsStatus.VPS_SUCCESS,
                 has_node_geo=True,
                 node_geo=node,

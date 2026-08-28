@@ -80,6 +80,25 @@ def _dds_announce_current() -> None:
         traceback.print_exc()
 
 
+def _pinhole_params(cam):
+    """
+    (fx, fy, cx, cy) from a COLMAP camera, whatever model it uses.
+
+    COLMAP packs parameters differently per model and the leading four are not intrinsics in
+    a fixed order. The single-focal models carry (f, cx, cy, ...) and need f duplicated;
+    only the two-focal models are already (fx, fy, cx, cy). Distortion is dropped, which is
+    what the HTTP path does too — the localizer is asked for a PINHOLE camera either way.
+    """
+    p = [float(x) for x in cam.params]
+    name = cam.model.name if hasattr(cam.model, "name") else str(cam.model)
+    if name in ("SIMPLE_PINHOLE", "SIMPLE_RADIAL", "SIMPLE_RADIAL_FISHEYE", "RADIAL",
+                "RADIAL_FISHEYE"):
+        return [p[0], p[0], p[1], p[2]]
+    if len(p) >= 4:
+        return [p[0], p[1], p[2], p[3]]
+    raise ValueError(f"cannot derive pinhole intrinsics from camera model {name} with {p}")
+
+
 def _dds_localize(image_bytes, request):
     """Adapt a VpsRequest to the localizer. Runs on the shared worker, never on the loop."""
     import cv2 as _cv2
@@ -101,13 +120,18 @@ def _dds_localize(image_bytes, request):
     # a VisionMeta this service does not publish, so the map's own camera model is used.
     # That is correct for query images drawn from the map and wrong for a foreign camera —
     # the gap is that the 1.7 request has nowhere to put intrinsics.
+    #
+    # The COLMAP model must be translated, not truncated. An earlier version took the first
+    # four params and called them PINHOLE; on a SIMPLE_RADIAL map, whose params are
+    # (f, cx, cy, k), that fed cx in as fy and cy in as cx. The result localized, returned
+    # VPS_SUCCESS with enough inliers to pass the threshold, and was 9.6 m out — plausible,
+    # wrong, and silent, which is the failure mode this whole binding is meant to avoid.
     from oscp.geoposeprotocol import CameraParameters
     cam = localizer.reconstruction.cameras[
         next(iter(localizer.reconstruction.images.values())).camera_id]
-    prm = [float(x) for x in cam.params]
     params = CameraParameters()
     params.model = "PINHOLE"
-    params.modelParams = prm[:4] if len(prm) >= 4 else [prm[0], prm[0], prm[1], prm[2]]
+    params.modelParams = _pinhole_params(cam)
 
     result = localizer.localize(img, params)
     if result is None or not result.framed_poses:
@@ -141,6 +165,9 @@ async def _lifespan(app: FastAPI):
                 participant,
                 _os.environ.get("OPENVPS_SERVICE_ID", "svc:vps:openvps/local;v=dev"),
                 lambda img, req: _dds_worker.run(_dds_localize, img, req),
+                # Lets the service honour a ;v=<map_id> in the request: the announce
+                # advertises that form, so a discovering client will send it back.
+                current_revision=lambda: None if currentMapId == kDummyMapId else currentMapId,
             )
             from spatialdds.announce import ServiceAnnouncer
             _dds_announcer = ServiceAnnouncer(
@@ -338,6 +365,10 @@ async def load_transform(id: str, response: Response):
         response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
         return {"ERROR": f"Failed to load map transform {id}: {ex}"}
     _touch_map(id)
+    # A transform reload can make a map announceable that was not before: the geodetic
+    # anchor is what gates discovery, and this is the endpoint that supplies it. Without
+    # this, georeferencing a live map left it undiscoverable until someone reloaded it.
+    _dds_announce_current()
     return {"STATUS": f"Successfully updated the transform of map {id}"}
 
 

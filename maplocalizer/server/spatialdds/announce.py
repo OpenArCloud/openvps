@@ -218,7 +218,10 @@ class ServiceAnnouncer:
         self._ttl = ttl_sec
         self._writer = tt.make_writer(
             participant, TOPIC_ANNOUNCE, Announce, QOS_ANNOUNCE, lifespan_sec=float(ttl_sec))
-        self._current = None          # (service_id, Announce sample) or None
+        # (service_id, payload dict, Announce sample), or None when nothing is announced.
+        # The payload is kept beside the sample so a refresh can re-stamp and rebuild it
+        # without re-deriving coverage; see _publish.
+        self._current = None
         self._last_refresh = 0.0
 
     def service_id_for(self, map_id: str) -> str:
@@ -265,14 +268,37 @@ class ServiceAnnouncer:
             min_inliers=20, scale_factor=scale, ttl_sec=self._ttl,
             transforms=self._map_to_enu_transform_entry(mt, map_id),
         )
+        self._publish(sid, payload)
+        log.info("announced %s covering %s", sid, bbox)
+        return True
+
+    def _publish(self, sid: str, payload: dict) -> None:
+        """
+        Stamp with now, write, and remember. The only path that publishes an announce.
+
+        Both the initial announce and every refresh go through here, so the stamp cannot
+        drift from the write again. It did: `tick` used to re-write the stored sample, which
+        refreshes the DDS Lifespan — each write does — but leaves `Announce.stamp` frozen at
+        the moment the map was loaded. The two liveness signals then disagree, and a consumer
+        applying the only backstop the spec states, that an announce is not to be used beyond
+        `stamp + ttl_sec`, drops a service that is announcing every 150 s and answering
+        requests. Discovery reports an empty deployment and nothing errors at either end.
+
+        The payload is re-stamped rather than rebuilt. Rebuilding would re-walk the
+        reconstruction for the coverage hull every refresh, and worse, would need a reference
+        to the localizer held across the interval — which the LRU pool may have evicted by
+        then, so it could announce a map no longer loaded. Re-stamping also makes "otherwise
+        byte-identical to the previous announce" true by construction rather than by care.
+        """
+        import time as _t
+        from spatialdds_demo.json_mapping import from_json
+
         now = _t.time()
         payload["stamp"] = {"sec": int(now), "nanosec": int((now % 1) * 1e9)}
         sample = from_json(self._Announce, payload)
         self._writer.write(sample)
-        self._current = (sid, sample)
+        self._current = (sid, payload, sample)
         self._last_refresh = now
-        log.info("announced %s covering %s", sid, bbox)
-        return True
 
     def _map_to_enu_transform_entry(self, mt, map_id: str):
         """
@@ -305,20 +331,24 @@ class ServiceAnnouncer:
         }]
 
     def tick(self) -> None:
-        """Re-announce at half the TTL so the Lifespan never expires under a live service."""
+        """
+        Re-announce at half the TTL, stamp included.
+
+        Half, not the whole TTL, so a single dropped refresh does not expire the service.
+        """
         import time as _t
         if self._current is None:
             return
         if _t.time() - self._last_refresh < self._ttl / 2.0:
             return
-        self._writer.write(self._current[1])
-        self._last_refresh = _t.time()
+        sid, payload, _sample = self._current
+        self._publish(sid, payload)
 
     def clear(self) -> None:
         """Dispose the announce, so consumers see removal rather than waiting out the TTL."""
         if self._current is None:
             return
-        sid, sample = self._current
+        sid, _payload, sample = self._current
         self._current = None
         try:
             self._tt.dispose(self._writer, sample)

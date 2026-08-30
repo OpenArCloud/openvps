@@ -125,6 +125,63 @@ class AnnouncerLifecycle(unittest.TestCase):
         self.announcer.clear()
         self.assertNotIn(f"{self.BASE};v=mapA", self._live())
 
+    def _announce_of(self, sid_suffix="mapA"):
+        """The live announce for one map, read through a fresh reader."""
+        reader = tt.make_reader(self.dp, ann.TOPIC_ANNOUNCE, Announce, ann.QOS_ANNOUNCE)
+        time.sleep(0.5)
+        want = f"{self.BASE};v={sid_suffix}"
+        for s in tt.take_with_state(reader):
+            if s.alive and s.data is not None and s.data.service_id == want:
+                return s.data
+        return None
+
+    def test_refresh_restamps_the_announce(self):
+        """
+        A refresh must move Announce.stamp, not just the Lifespan.
+
+        Re-writing the stored sample keeps the sample alive on the wire, because each write
+        refreshes Lifespan — but it leaves the payload's own stamp frozen at the moment the
+        map was loaded. The two liveness signals then disagree, and a consumer applying the
+        only backstop the spec states (do not use an announce beyond stamp + ttl_sec) drops
+        a service that is announcing every 150 s and answering requests. Observed on AWS:
+        discovery returned an empty deployment while the localizer returned VPS_SUCCESS for
+        the same map.
+        """
+        self.announcer.set_map("mapA", _Localizer("mapA"))
+        first = self._announce_of()
+        self.assertIsNotNone(first, "nothing announced")
+        first_stamp = (first.stamp.sec, first.stamp.nanosec)
+
+        # Pretend the refresh interval elapsed rather than sleeping through it.
+        self.announcer._last_refresh -= (self.announcer._ttl / 2.0) + 1.0
+        time.sleep(1.1)                      # so a second-resolution stamp can differ
+        self.announcer.tick()
+
+        second = self._announce_of()
+        self.assertIsNotNone(second, "the refresh removed the announce")
+        second_stamp = (second.stamp.sec, second.stamp.nanosec)
+
+        self.assertGreater(second_stamp, first_stamp,
+                           "tick() refreshed the Lifespan but left the payload stamp frozen")
+        # Everything else must be the sample it was.
+        self.assertEqual(second.service_id, first.service_id)
+        self.assertEqual(list(second.coverage[0].bbox), list(first.coverage[0].bbox))
+        self.assertEqual([(h.key, h.value) for h in second.hints],
+                         [(h.key, h.value) for h in first.hints])
+
+    def test_tick_inside_the_interval_writes_nothing(self):
+        """The fix must not turn the refresh into a publish on every poll."""
+        self.announcer.set_map("mapA", _Localizer("mapA"))
+        before = self._announce_of()
+        marker = self.announcer._last_refresh
+        for _ in range(5):
+            self.announcer.tick()
+        self.assertEqual(self.announcer._last_refresh, marker,
+                         "tick() published inside the refresh interval")
+        after = self._announce_of()
+        self.assertEqual((after.stamp.sec, after.stamp.nanosec),
+                         (before.stamp.sec, before.stamp.nanosec))
+
     def test_coverage_is_padded_around_the_cameras(self):
         """
         The box covers the camera hull plus the pad, in metres, not the bare hull.

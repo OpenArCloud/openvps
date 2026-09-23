@@ -15,7 +15,7 @@ export class GenericStatusPublisher<PersistedState> {
         private metadata: ProcessMetadata,
     ) {}
 
-    public publishStatus(task: TaskDescription, fullState: PersistedState, frontendExtra?: any) {
+    public publishStatus(task: TaskDescription, fullState: PersistedState, frontendExtra?: Record<string, unknown>) {
         publishStatusToFrontend(this.metadata, task, this.io, frontendExtra);
         persistStatus<PersistedState>(this.statusFileName, fullState);
     }
@@ -27,7 +27,7 @@ export class GenericStatusPublisher<PersistedState> {
     }
 }
 
-export function publishStatusToFrontend(metadata: ProcessMetadata, task: TaskDescription, io: Server, frontendExtra?: any) {
+export function publishStatusToFrontend(metadata: ProcessMetadata, task: TaskDescription, io: Server, frontendExtra?: Record<string, unknown>) {
     const frontendUpdate: FrontendStatusUpdate = {...metadata, ...task, ...frontendExtra};
     //console.log(` [publishStatus] sending status update: ${JSON.stringify(frontendUpdate)}`);
     io.emit("processingUpdate", JSON.stringify(frontendUpdate));

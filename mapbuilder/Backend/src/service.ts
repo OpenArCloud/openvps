@@ -22,18 +22,25 @@ import {ExtractTask} from "./processing/extractTask";
 import {ThumbnailTask} from "./processing/thumbnailTask";
 import {authConfig} from "./auth";
 import {readHlocTransform, saveHlocTransform} from "./transform";
+import {StageSettingsStore} from "./processing/stageSettingsStore";
+import {getHlocConfiguredStageSettingsSchemas, HlocConfigurationStage, HlocMapScaleEstimationStage} from "./processing/hloc/hlocStages";
+import {getDatasetSettingsSchemas} from "./processing/datasetSettings";
 
-function handleUpload(taskManager: TaskManager, uploadsRoot: string) {
+function handleUpload(taskManager: TaskManager, uploadsRoot: string, stageSettingsStore: StageSettingsStore) {
     return async (req: Request, resp: Response) => {
         let zipFile: string | null = null;
 
         let mapName: string | undefined;
+        let datasetSettingsFromForm: unknown | undefined;
 
         req.busboy.on("field", (fieldname: string, val: string) => {
             // We're just going to capture the form data in a JSON document.
             console.log(" [service] Field [" + fieldname + "]: value: " + val);
             if (fieldname == "map-name") {
                 mapName = val;
+            }
+            if (fieldname == "datasetSettings") {
+                datasetSettingsFromForm = JSON.parse(val);
             }
         });
 
@@ -68,6 +75,7 @@ function handleUpload(taskManager: TaskManager, uploadsRoot: string) {
                             zip: zipFile,
                             name: mapName ? mapName : "<noname>",
                             size: fileSize,
+                            datasetSettings: stageSettingsStore.resolve(getDatasetSettingsSchemas(), datasetSettingsFromForm),
                         },
                         [DataSet.uploadTaskName]: {
                             type: DataSet.uploadTaskName,
@@ -118,6 +126,14 @@ export function startRestService(statuses: DataSetStatus[], config: Environmenta
     });
 
     const taskManager = new TaskManager(config, io);
+    const stageSettingsStore = new StageSettingsStore(config.settingsDir ?? path.join(config.uploadsDir, "settings"), [
+        ...getDatasetSettingsSchemas(),
+        ...getHlocConfiguredStageSettingsSchemas(),
+    ]);
+
+    for (const status of statuses) {
+        status.metadata.datasetSettings = stageSettingsStore.resolve(getDatasetSettingsSchemas(), status.metadata.datasetSettings);
+    }
 
     taskManager.addMultiple(statuses);
 
@@ -130,7 +146,20 @@ export function startRestService(statuses: DataSetStatus[], config: Environmenta
 
     app.use(busboy());
 
-    app.post("/uploadStrayRecordingZip", protectedRoute, handleUpload(taskManager, config.uploadsDir));
+    app.post("/uploadStrayRecordingZip", protectedRoute, handleUpload(taskManager, config.uploadsDir, stageSettingsStore));
+
+    app.get("/settings/hloc", protectedRoute, (req: Request, res: Response) => {
+        res.status(200).send(stageSettingsStore.getViews());
+    });
+
+    app.put("/settings/hloc/:stageName", protectedRoute, (req: Request, res: Response) => {
+        try {
+            const values = stageSettingsStore.save(req.params.stageName, req.body);
+            res.status(200).send(values);
+        } catch (error) {
+            res.status(400).send(error.toString());
+        }
+    });
 
     app.get("/maps", protectedRoute, (req: Request, res: Response) => {
         //console.log(" [service] All status retrieval request");
@@ -163,12 +192,16 @@ export function startRestService(statuses: DataSetStatus[], config: Environmenta
             res.status(500).send("Error querying selected map:" + JSON.stringify(selectResponse));
             return;
         } else {
-            let mapId = selectResponse.id;
-            let hlocStatus = taskManager.getAllStatuses().filter((dataSetStatus) => {
+            const mapId = selectResponse.id;
+            if (mapId === null) {
+                res.status(200).send("");
+                return;
+            }
+            const hlocStatus = taskManager.getAllStatuses().filter((dataSetStatus) => {
                 return dataSetStatus.hloc?.[0]?.mapId === mapId;
             });
             if (hlocStatus.length >= 0 && hlocStatus[0]) {
-                let dataSetId = hlocStatus[0].metadata.id;
+                const dataSetId = hlocStatus[0].metadata.id;
                 if (dataSetId) {
                     res.status(200).send(dataSetId);
                     return;
@@ -219,7 +252,7 @@ export function startRestService(statuses: DataSetStatus[], config: Environmenta
         if (success && fs.existsSync(success)) {
             res.status(200).sendFile(success);
         } else {
-            let img =
+            const img =
                 '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="#AAAAAA" viewBox="0 0 256 256"><path d="M216,40H40A16,16,0,0,0,24,56V200a16,16,0,0,0,16,16h64a8,8,0,0,0,7.59-5.47l14.83-44.48L163,151.43a8.07,8.07,0,0,0,4.46-4.46l14.62-36.55,44.48-14.83A8,8,0,0,0,232,88V56A16,16,0,0,0,216,40ZM112.41,157.47,98.23,200H40V172l52-52,30.42,30.42L117,152.57A8,8,0,0,0,112.41,157.47ZM216,82.23,173.47,96.41a8,8,0,0,0-4.9,4.62l-14.72,36.82L138.58,144l-35.27-35.27a16,16,0,0,0-22.62,0L40,149.37V56H216Zm12.68,33a8,8,0,0,0-7.21-1.1l-23.8,7.94a8,8,0,0,0-4.9,4.61l-14.31,35.77-35.77,14.31a8,8,0,0,0-4.61,4.9l-7.94,23.8A8,8,0,0,0,137.73,216H216a16,16,0,0,0,16-16V121.73A8,8,0,0,0,228.68,115.24ZM216,200H148.83l3.25-9.75,35.51-14.2a8.07,8.07,0,0,0,4.46-4.46l14.2-35.51,9.75-3.25Z"></path></svg>';
 
             res.status(200).setHeader("Content-Type", "image/svg+xml").send(img);
@@ -242,7 +275,7 @@ export function startRestService(statuses: DataSetStatus[], config: Environmenta
         const id = req.params.id;
         const MAPLOCALIZER_URL = process.env.MAPLOCALIZER_URL;
 
-        let mapId = taskManager.getStatusOfProcess(id)?.hloc?.[0].mapId;
+        const mapId = taskManager.getStatusOfProcess(id)?.hloc?.[0].mapId;
         if (!mapId) {
             console.error("Hloc map not found for dataset " + id);
             res.status(404).send("Hloc map not found for dataset " + id);
@@ -284,8 +317,8 @@ export function startRestService(statuses: DataSetStatus[], config: Environmenta
 
     app.post("/maps/:id/hloc/registerConfig", protectedRoute, (req: Request, res: Response) => {
         const datasetId = req.params.id;
-        const hlocMappingConfig = req.body; // WARNING: for some reason, this here is already parsed from JSON string into a dict.
-        const createdHlocMappingConfigStatus = taskManager.registerHlocConfig(datasetId, hlocMappingConfig);
+        const stageSettings = stageSettingsStore.resolve(getHlocConfiguredStageSettingsSchemas("run"), coerceHlocRegisterSettings(req.body));
+        const createdHlocMappingConfigStatus = taskManager.registerHlocConfig(datasetId, stageSettings);
         if (createdHlocMappingConfigStatus) {
             res.status(200).send(JSON.stringify(createdHlocMappingConfigStatus));
         } else {
@@ -361,6 +394,27 @@ export function startRestService(statuses: DataSetStatus[], config: Environmenta
     httpServer.listen(3000, () => {
         console.log("MapBuilder Backend server is running on port 3000");
     });
+}
+
+function coerceHlocRegisterSettings(requestBody: unknown): Record<string, unknown> {
+    const body = typeof requestBody === "object" && requestBody !== null ? (requestBody as Record<string, unknown>) : {};
+    if (HlocConfigurationStage.stageName in body || HlocMapScaleEstimationStage.stageName in body) {
+        return body;
+    }
+
+    return {
+        [HlocConfigurationStage.stageName]: {
+            featureConf: body.featureConf ?? body.feature_conf,
+            matcherConf: body.matcherConf ?? body.matcher_conf,
+            retrievalConf: body.retrievalConf ?? body.retrieval_conf,
+            pairsStrategy: body.pairsStrategy ?? body.pairs_strategy,
+        },
+        [HlocMapScaleEstimationStage.stageName]: {
+            mode: body.mode ?? body.metric_alignment_mode,
+            minSharedImages: body.minSharedImages ?? body.metric_alignment_min_shared_images,
+            minPairDistanceM: body.minPairDistanceM ?? body.metric_alignment_min_pair_distance_m,
+        },
+    };
 }
 
 async function protectedRoute(req: Request, res: Response, next: NextFunction) {

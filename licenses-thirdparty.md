@@ -20,6 +20,8 @@ AuthJS [github](https://github.com/nextauthjs/next-auth)
 The Frontend uses [shadcn-svelte component library](https://www.shadcn-svelte.com/). The files under `Frontend/src/lib` are from `shadcn-svelte`. Shadn-svelte components are added as needed, see [instructions](https://www.shadcn-svelte.com/docs/installation/sveltekit). Example commmand to add the button component `npx  shadcn-svelte@latest add button`. Do not add any of our own files under `Frontend/src/lib`, so that we can delete and recreate this directory as needed, not impacting our codes.
 
 Icons are from [Phosphor Icons](https://phosphoricons.com/) (regular version).
+[Phosphor Icons source repository](https://github.com/phosphor-icons/core)
+[MIT license](https://github.com/phosphor-icons/core/blob/main/LICENSE)
 Change `<svg>` tag attributes to `width="24" height="24" fill="currentColor"` after importing a new one.
 
 # MapAligner

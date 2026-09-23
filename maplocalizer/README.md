@@ -24,7 +24,7 @@ git submodule update --init --recursive
 ```
 python3 -m venv .venv
 . .venv/bin/activate
-pip install --no-cache-dir --verbose \
+pip install --verbose \
     numpy \
     pyyaml \
     ruamel.yaml \

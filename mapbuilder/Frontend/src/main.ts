@@ -7,7 +7,7 @@
 import "./app.css";
 import App from "./components/App.svelte";
 
-function handleThemeChange(e) {
+function handleThemeChange(e: MediaQueryListEvent | MediaQueryList) {
     if (e.matches) {
         document.body.classList.add("dark");
         document.body.classList.remove("light");

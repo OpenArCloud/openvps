@@ -10,8 +10,9 @@ import {Server} from "socket.io";
 import {GenericStatusPublisher} from "./statusPublisher";
 import {ExtractTask} from "./processing/extractTask";
 import {ThumbnailTask} from "./processing/thumbnailTask";
-import {HlocConfig} from "./processing/hloc/hlocConfig";
 import {HlocMapManager} from "./processing/hloc/hlocMapManager";
+import {DatasetSettingsSchema} from "./processing/datasetSettings";
+import {PipelineStageSettings, resolveStageSettings} from "./processing/stageSettings";
 
 import fs from "node:fs";
 
@@ -36,12 +37,14 @@ export interface ProcessMetadata {
     zip: string;
     name: string;
     size: number;
+    datasetSettings?: PipelineStageSettings;
 }
 
 export interface HlocCreationState {
     status: TaskStatus;
     mapId: string;
-    mappingConfig: HlocConfig;
+    stageSettings: PipelineStageSettings;
+    mappingConfig?: unknown;
     tasks: HlocStages;
 }
 
@@ -110,12 +113,12 @@ export class DataSet {
         this.state.hloc.push(hlocStatus);
     }
 
-    public registerHlocConfig(hlocConfig: HlocConfig) {
+    public registerHlocConfig(stageSettings: PipelineStageSettings) {
         if (!this.state.hloc) {
             this.state.hloc = [];
         }
 
-        const result = this.hlocMapManager.registerNewConfig(hlocConfig);
+        const result = this.hlocMapManager.registerNewConfig(stageSettings);
         this.overwriteHlocStatus(result);
 
         return result;
@@ -145,7 +148,8 @@ export class DataSet {
             this.state[ThumbnailTask.stageName] = task;
             this.mapStatusPublisher.publishStatus(task, this.state);
         };
-        const thumbnailTask = new ThumbnailTask(this.uploadLocation, this.config, publishThumbnailTaskStatus, undefined);
+        const datasetSettings = resolveStageSettings(DatasetSettingsSchema, this.uploadLocation.getDatasetSettings()?.[DatasetSettingsSchema.stageName]);
+        const thumbnailTask = new ThumbnailTask(this.uploadLocation, datasetSettings.thumbnailRotation as number, this.config, publishThumbnailTaskStatus, undefined);
         await thumbnailTask.execute();
     }
 

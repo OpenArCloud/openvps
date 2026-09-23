@@ -11,9 +11,14 @@
     import { mapSearchQuery } from "../stores";
     import { Input } from "$lib/components/ui/input";
     import UploadSvg from "../svg/uploadCloud.svelte";
+    import SettingsSvg from "../svg/settings.svelte";
 
     const onAddClick = () => {
         appStore.setAddDialogVisible(!$appStore.addDialogVisible);
+    };
+
+    const onSettingsClick = () => {
+        appStore.setSettingsDialogVisible(!$appStore.settingsDialogVisible);
     };
 </script>
 
@@ -26,6 +31,14 @@
             </Button>
         </Tooltip.Trigger>
         <Tooltip.Content>Upload New Map</Tooltip.Content>
+    </Tooltip.Root>
+    <Tooltip.Root>
+        <Tooltip.Trigger asChild let:builder>
+            <Button builders={[builder]} variant="outline" on:click={onSettingsClick}>
+                <SettingsSvg />&nbsp;Settings
+            </Button>
+        </Tooltip.Trigger>
+        <Tooltip.Content>Pipeline Settings</Tooltip.Content>
     </Tooltip.Root>
 </div>
 

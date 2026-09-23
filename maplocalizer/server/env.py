@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     appName: str = "MapLocalizer"
     uploadsDir: str = ""
     debug: bool = False
-    maxLoadedMaps: int = 8
+    maxLoadedMaps: int = 1
     workerId: str = "default"
 
     # this line loads the env_file and overwrites the values in this class (case-insensitive)

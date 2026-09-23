@@ -12,6 +12,7 @@ import {StageUpdatePublisher, TaskDescription, TaskStatus} from "../dataSet";
 export class ThumbnailTask extends IdempotentStage {
     constructor(
         private uploadLocation: UploadLocation,
+        private rotateDegrees: number,
         private config: EnvironmentalConfig,
         publishTaskStatus: StageUpdatePublisher,
         taskState: TaskDescription | undefined,
@@ -25,7 +26,7 @@ export class ThumbnailTask extends IdempotentStage {
         const extractCommand = `python3 generate_thumbnail.py \
             --input_path ${this.uploadLocation.getStrayRecordingDir()}/rgb.mp4 \
             --output_path ${this.uploadLocation.getThumbnailFilePath()} \
-            --rotate_degrees 90`;
+            --rotate_degrees ${this.rotateDegrees}`;
         await this.executeCommand(extractCommand, this.config.shell);
     }
 

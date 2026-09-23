@@ -46,13 +46,15 @@ def rotate_intrinsics(degrees, w, h, fx, fy, px, py):
 
 
 def rotate_image(degrees, image):
-    # WARNING: the OpenCV rotate() seems to have the CW and CCW directionswapped :(
+    # positive degrees means counterclockwise, i.e.,
+    # 90 rotates the image 90 degrees counterclockwise
+
     if degrees == 270:
-        operation = cv2.ROTATE_90_COUNTERCLOCKWISE  # cv2.ROTATE_90_CLOCKWISE
+        operation = cv2.ROTATE_90_CLOCKWISE
     elif degrees == 180:
         operation = cv2.ROTATE_180
-    elif degrees == 90:  # positive 90 degrees means counterclockwise
-        operation = cv2.ROTATE_90_CLOCKWISE  # cv2.ROTATE_90_COUNTERCLOCKWISE
+    elif degrees == 90:
+        operation = cv2.ROTATE_90_COUNTERCLOCKWISE
     else:
         raise ValueError("Rotation degrees must be one of 90, 180, 270")
 

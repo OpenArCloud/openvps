@@ -11,20 +11,20 @@ import {ScriptExecutor} from "../scriptexecutor";
 
 import fs from "fs-extra";
 import path from "node:path";
-import {HlocConfig} from "./hlocConfig";
-import {HlocFormatStage, HlocImageFilterStage, HlocConfigurationStage, HlocMapBuildStage, HlocMapScaleEstimationStage, HlocMapPlyExportStage, HlocMapZipExportStage} from "./hlocStages";
+import {PipelineStageSettings, resolveStageSettings, StageSettingsSchema, StageSettingsValues} from "../stageSettings";
+import {
+    HlocConfigurationSettings,
+    HlocConfigurationStage,
+    HlocFormatSettings,
+    HlocFormatStage,
+    HlocImageFilterStage,
+    HlocMapBuildStage,
+    HlocMapPlyExportStage,
+    HlocMapScaleEstimationSettings,
+    HlocMapScaleEstimationStage,
+    HlocMapZipExportStage,
+} from "./hlocStages";
 import {getHlocMapWorkDirectory} from "./hlocMapManager";
-
-//import {stringify} from "yaml";
-//export function writeHlocConfigToFile(hlocConfig: HlocConfig, uploadLocation: UploadLocation, mapId: string): string {
-//    const configFileName = path.join(getHlocMapWorkDirectory(uploadLocation.getDataSetRoot(), mapId), "mapBuildConfig.yaml")
-//
-//    const hlocAsYaml = stringify(hlocConfig);
-//    console.log(` [writeHlocConfigToFile] persisting config to file: ${hlocAsYaml}`)
-//    fs.writeFileSync(configFileName, hlocAsYaml);
-//
-//    return configFileName;
-//}
 
 export class HlocCreator extends ScriptExecutor {
     constructor(
@@ -87,6 +87,7 @@ export class HlocCreator extends ScriptExecutor {
             const hlocFormatStatus = this.state.tasks.hlocFormat;
             const hlocFormatStage = new HlocFormatStage(
                 this.uploadLocation,
+                this.getRunStageSettings(HlocFormatStage.settingsSchema) as HlocFormatSettings,
                 this.config,
                 this.subtaskPublishStatus,
                 hlocFormatStatus
@@ -116,7 +117,7 @@ export class HlocCreator extends ScriptExecutor {
             const hlocConfigurationStatus = this.state.tasks.hlocConfiguration;
             const hlocConfigurationStage = new HlocConfigurationStage(
                 workDir,
-                this.state.mapId,
+                this.getRunStageSettings(HlocConfigurationStage.settingsSchema) as HlocConfigurationSettings,
                 this.config,
                 this.subtaskPublishStatus,
                 hlocConfigurationStatus
@@ -146,6 +147,7 @@ export class HlocCreator extends ScriptExecutor {
         if (!mapScaleEstimationStatus || mapScaleEstimationStatus.status != TaskStatus.completed) {
             const mapScaleEstimationStage = new HlocMapScaleEstimationStage(
                 workDir,
+                this.getRunStageSettings(HlocMapScaleEstimationStage.settingsSchema) as HlocMapScaleEstimationSettings,
                 this.config,
                 this.subtaskPublishStatus,
                 mapScaleEstimationStatus
@@ -178,8 +180,8 @@ export class HlocCreator extends ScriptExecutor {
         return this.state;
     }
 
-    public getMappingConfig(): HlocConfig {
-        return this.state.mappingConfig;
+    public getStageSettings(): PipelineStageSettings {
+        return this.state.stageSettings;
     }
 
     public getCurrentStatus(): HlocCreationState {
@@ -204,5 +206,9 @@ export class HlocCreator extends ScriptExecutor {
         } else {
             console.error("[hloc] Download link requested for unfinished map!");
         }
+    }
+
+    private getRunStageSettings(schema: StageSettingsSchema): StageSettingsValues {
+        return resolveStageSettings(schema, this.state.stageSettings[schema.stageName]);
     }
 }

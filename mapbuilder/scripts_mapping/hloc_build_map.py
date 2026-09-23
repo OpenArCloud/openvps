@@ -33,15 +33,16 @@
 # conda activate hloc
 # python hloc_build_map.py --config_file <config/filename>
 
-import os
 import yaml # conda install -c conda-forge pyyaml
 import argparse
 from pathlib import Path
 import datetime
+import traceback
 
 from hloc import extract_features, match_features
 from hloc import pairs_from_exhaustive, pairs_from_retrieval, pairs_from_poses
 from hloc import reconstruction
+from hloc.utils.read_write_model import read_model, write_model
 from pycolmap import CameraMode
 from test_gpu import getGpuInfo
 
@@ -122,11 +123,8 @@ def hloc_build_map(config):
                 print("Converting from text to binary model ...")
                 print("  Input: " + str(txt_model_path))
                 print("  Output: " + str(bin_model_path))
-                os.system('python ' + cfg['hloc_path'] + '/utils/read_write_model.py' +
-                    ' --input_model ' + str(txt_model_path) +
-                    ' --input_format .txt' +
-                    ' --output_model ' + str(bin_model_path) +
-                    ' --output_format .bin')
+                cameras, images, points3D = read_model(txt_model_path, ext=".txt")
+                write_model(cameras, images, points3D, bin_model_path, ext=".bin")
 
                 print("Pairs from poses ...")
                 prior_model_path = Path(bin_model_path)
@@ -170,8 +168,8 @@ def hloc_build_map(config):
 
         print("ALL DONE.")
         return True
-    except Exception as ex:
-        print("Exception occurred: " + str(ex))
+    except Exception:
+        print("Exception occurred:\n" + traceback.format_exc())
         return False
 
 

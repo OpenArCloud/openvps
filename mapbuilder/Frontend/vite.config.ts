@@ -19,6 +19,7 @@ export default defineConfig({
 		port: 8047,
 		proxy: {
 			'/maps': 'http://localhost:3000',
+			'/settings': 'http://localhost:3000',
 			'/uploadStrayRecordingZip': 'http://localhost:3000',
 			'/auth': {
 				target: 'http://localhost:3000',

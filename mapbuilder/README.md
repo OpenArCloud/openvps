@@ -24,7 +24,7 @@ git submodule update --init --recursive
 cd Backend
 python3 -m venv .venv
 . .venv/bin/activate
-pip install --no-cache-dir --verbose \
+pip install --verbose \
     numpy \
     pyyaml \
     ruamel.yaml \
@@ -34,9 +34,16 @@ pip install --no-cache-dir --verbose \
     transforms3d
 ```
 
-Install HLOC
+Install hloc
 ```
 pip install -e ../../Hierarchical-Localization
+```
+
+Install additional dependencies of r2d2 and dir submodules of hloc
+```
+pip install --verbose \
+    pillow \
+    scikit-learn
 ```
 
 ## Authentication

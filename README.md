@@ -223,3 +223,7 @@ When updating the host GPU drivers, there might be need to update the nvidia/cud
  - Only one map can be active at a time (sufficient for educational purposes)
  - MapBuilder should have datasets and maps separated from each other, because from one dataset we could create multiple maps by using different HLOC methods and/or parameters.
  - Support for selecting various HLOC configs on the frontend
+ - Metric alignment fails if there are less than 4 shared images, which is abnormal. This occurs when the colmap model is broken into multiple pieces, and there is a bug in HLOC that may accidentally return a small model instead of the largest model. Use our fix [here](https://github.com/cvg/Hierarchical-Localization/pull/504)
+ - DIR image retrieval in HLOC is currently not working because the model is no longer available in [GDrive](https://drive.google.com/uc?id=1UWJGDuHtzaQdFhSMojoYVQjmCXhIwVvy
+ )
+ 

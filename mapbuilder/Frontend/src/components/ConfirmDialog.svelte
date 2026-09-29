@@ -16,7 +16,7 @@
 
 <Dialog.Root
     closeOnOutsideClick={true}
-    bind:open={$appStore.confirmDialog.visible}
+    open={$appStore.confirmDialog.visible}
     {onOpenChange}
     closeOnEscape={false}
 >
@@ -27,7 +27,7 @@
         {$appStore.confirmDialog.message}
         <Dialog.Footer>
             <Button
-                on:click={() => onOpenChange(false)}
+                on:click={() => appStore.setConfirmDialogVisible(false)}
                 variant="outline"
                 disabled={$appStore.confirmDialog.spinning}>Cancel</Button
             >

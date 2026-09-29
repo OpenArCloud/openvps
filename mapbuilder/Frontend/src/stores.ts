@@ -20,6 +20,25 @@ export type AppState = {
     setTheme: (theme: "light" | "dark") => void;
     addDialogVisible: boolean;
     setAddDialogVisible: (addDialogVisible: boolean) => void;
+    settingsDialogVisible: boolean;
+    setSettingsDialogVisible: (settingsDialogVisible: boolean) => void;
+    runSettingsDialog: {
+        visible: boolean;
+        initial: PipelineStageSettings;
+        completedStages: string[];
+        callback: (stageSettings: PipelineStageSettings) => void;
+    };
+    setRunSettingsDialogVisible: (visible: boolean) => void;
+    setRunSettingsDialogInitial: (initial: PipelineStageSettings) => void;
+    setRunSettingsDialogCompletedStages: (completedStages: string[]) => void;
+    setRunSettingsDialogCallback: (callback: (stageSettings: PipelineStageSettings) => void) => void;
+    appliedSettingsDialog: {
+        visible: boolean;
+        mapName: string;
+        values: PipelineStageSettings;
+    };
+    setAppliedSettingsDialogVisible: (visible: boolean) => void;
+    setAppliedSettingsDialogContent: (mapName: string, values: PipelineStageSettings) => void;
     confirmDialog: {
         visible: boolean;
         message: string;
@@ -49,6 +68,57 @@ function createAppStore(): AppState & StoreSubscribable<AppState> {
         addDialogVisible: false,
         setAddDialogVisible: (addDialogVisible: boolean) => {
             update((state: AppState) => ({ ...state, addDialogVisible }));
+        },
+        settingsDialogVisible: false,
+        setSettingsDialogVisible: (settingsDialogVisible: boolean) => {
+            update((state: AppState) => ({ ...state, settingsDialogVisible }));
+        },
+        runSettingsDialog: {
+            visible: false,
+            initial: {},
+            completedStages: [],
+            callback: () => {},
+        },
+        setRunSettingsDialogVisible(visible) {
+            update((state: AppState) => ({
+                ...state,
+                runSettingsDialog: { ...state.runSettingsDialog, visible },
+            }));
+        },
+        setRunSettingsDialogInitial(initial) {
+            update((state: AppState) => ({
+                ...state,
+                runSettingsDialog: { ...state.runSettingsDialog, initial },
+            }));
+        },
+        setRunSettingsDialogCompletedStages(completedStages) {
+            update((state: AppState) => ({
+                ...state,
+                runSettingsDialog: { ...state.runSettingsDialog, completedStages },
+            }));
+        },
+        setRunSettingsDialogCallback(callback) {
+            update((state: AppState) => ({
+                ...state,
+                runSettingsDialog: { ...state.runSettingsDialog, callback },
+            }));
+        },
+        appliedSettingsDialog: {
+            visible: false,
+            mapName: "",
+            values: {},
+        },
+        setAppliedSettingsDialogVisible(visible) {
+            update((state: AppState) => ({
+                ...state,
+                appliedSettingsDialog: { ...state.appliedSettingsDialog, visible },
+            }));
+        },
+        setAppliedSettingsDialogContent(mapName, values) {
+            update((state: AppState) => ({
+                ...state,
+                appliedSettingsDialog: { ...state.appliedSettingsDialog, mapName, values },
+            }));
         },
         confirmDialog: {
             visible: false,
@@ -151,6 +221,98 @@ function createLocalizerStore() {
 
 export const localizerStore: LocalizerState & StoreSubscribable<LocalizerState> = createLocalizerStore();
 
+export type SettingDescriptor = {
+    kind: "number" | "integer" | "boolean" | "string" | "enum";
+    key: string;
+    label: string;
+    default: string | number | boolean;
+    description?: string;
+    advanced?: boolean;
+    min?: number;
+    max?: number;
+    step?: number;
+    options?: { label: string; value: string | number }[];
+};
+
+export type StageSettingsValues = Record<string, string | number | boolean>;
+export type PipelineStageSettings = Record<string, StageSettingsValues>;
+
+export type StageSettingsView = {
+    stageName: string;
+    title: string;
+    scope: "dataset" | "run";
+    settings: SettingDescriptor[];
+    values: StageSettingsValues;
+};
+
+export type PipelineSettingsState = {
+    isLoading: boolean;
+    error: Error | undefined;
+    value: StageSettingsView[];
+    fetch: () => Promise<void>;
+    save: (stageName: string, values: StageSettingsValues) => Promise<StageSettingsValues>;
+};
+
+function authHeaders(json = false) {
+    const headers = new Headers();
+    if (AUTH_ENABLED) {
+        headers.set("Authorization", `Bearer ${getAuthenticationToken()}`);
+    }
+    if (json) {
+        headers.set("Accept", "application/json, text/plain");
+        headers.set("Content-Type", "application/json");
+    }
+    return headers;
+}
+
+function createPipelineSettingsStore(): PipelineSettingsState & StoreSubscribable<PipelineSettingsState> {
+    const defaultState: PipelineSettingsState = {
+        isLoading: false,
+        error: undefined,
+        value: [],
+        async fetch() {
+            update((state) => ({ ...state, isLoading: true, error: undefined }));
+            try {
+                const response = await fetch(API_URLS.SETTINGS_HLOC, {
+                    method: "GET",
+                    headers: authHeaders(),
+                });
+                if (!response.ok) {
+                    throw new Error(`${response.status} - ${response.statusText}`);
+                }
+                const value = await response.json();
+                update((state) => ({ ...state, value, isLoading: false }));
+            } catch (error) {
+                update((state) => ({ ...state, error: error as Error, isLoading: false }));
+            }
+        },
+        async save(stageName, values) {
+            const response = await fetch(API_URLS.SETTINGS_HLOC_STAGE.replace(":stageName", stageName), {
+                method: "PUT",
+                headers: authHeaders(true),
+                body: JSON.stringify(values),
+            });
+            if (!response.ok) {
+                throw new Error(`${response.status} - ${response.statusText}`);
+            }
+            const savedValues = await response.json();
+            update((state) => ({
+                ...state,
+                value: state.value.map((stage) => (stage.stageName === stageName ? { ...stage, values: savedValues } : stage)),
+            }));
+            return savedValues;
+        },
+    };
+
+    const { subscribe, update } = writable<PipelineSettingsState>(defaultState);
+    return {
+        ...defaultState,
+        subscribe,
+    };
+}
+
+export const pipelineSettingsStore: PipelineSettingsState & StoreSubscribable<PipelineSettingsState> = createPipelineSettingsStore();
+
 // #region Processing Status
 
 export enum TaskStatus {
@@ -173,6 +335,7 @@ export interface ProcessMetadata {
     zip: string;
     name: string;
     size: number;
+    datasetSettings?: PipelineStageSettings;
 }
 
 export interface PointCloudCreationState {
@@ -182,7 +345,7 @@ export interface PointCloudCreationState {
 
 export interface HlocCreationState extends PointCloudCreationState {
     mapId: string;
-    mappingConfig: any;
+    stageSettings: PipelineStageSettings;
 }
 
 export interface Workflow {

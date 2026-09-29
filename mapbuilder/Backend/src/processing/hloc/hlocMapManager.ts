@@ -7,12 +7,12 @@
 import {UploadLocation} from "../../uploadLocation";
 import {EnvironmentalConfig} from "../../index";
 import {HlocCreationState, TaskStatus, TaskStatusPublisher} from "../../dataSet";
-import {HlocConfig} from "./hlocConfig";
 import _ from "lodash";
 import {HlocCreator} from "./hlocCreator";
 import {v4 as uuidv4} from "uuid";
 import path from "node:path";
-import {HlocFormatStage, HlocImageFilterStage, HlocConfigurationStage, HlocMapBuildStage, HlocMapScaleEstimationStage, HlocMapPlyExportStage, HlocMapZipExportStage} from "./hlocStages";
+import {PipelineStageSettings, resolvePipelineStageSettings, resolveStageSettings} from "../stageSettings";
+import {HlocFormatStage, HlocImageFilterStage, HlocConfigurationStage, HlocMapBuildStage, HlocMapScaleEstimationStage, HlocMapPlyExportStage, HlocMapZipExportStage, getHlocStageSettingsSchemas} from "./hlocStages";
 
 export function getHlocMapWorkDirectory(mapUploadRoot: string, hlocMapId: string) {
     return path.join(mapUploadRoot, "hlocMaps", hlocMapId);
@@ -32,6 +32,7 @@ export class HlocMapManager {
     ) {}
 
     public addMap(hlocState: HlocCreationState) {
+        hlocState.stageSettings = coerceLegacyStageSettings(hlocState);
         this.hlocMaps.set(hlocState.mapId, new HlocCreator(hlocState, this.uploadLocation, this.hlocStatusUpdate, this.config));
     }
 
@@ -50,7 +51,7 @@ export class HlocMapManager {
             console.log(` [resumeProcessingPresentItem] Error: mapId ${mapId} not present`);
             return {
                 mapId: mapId,
-                mappingConfig: {},
+                stageSettings: {},
                 status: TaskStatus.failed,
                 tasks: {
                     hlocFormat: {
@@ -86,8 +87,8 @@ export class HlocMapManager {
         }
     }
 
-    public registerNewConfig(hlocConfig: HlocConfig): HlocCreationState {
-        const presentMapIdProcessor = this.checkIfConfigAlreadyPresent(hlocConfig);
+    public registerNewConfig(stageSettings: PipelineStageSettings): HlocCreationState {
+        const presentMapIdProcessor = this.checkIfConfigAlreadyPresent(stageSettings);
         if (presentMapIdProcessor) {
             return presentMapIdProcessor.getCurrentStatus();
         }
@@ -96,7 +97,7 @@ export class HlocMapManager {
 
         const hlocState: HlocCreationState = {
             mapId: hlocMapId,
-            mappingConfig: hlocConfig,
+            stageSettings: stageSettings,
             status: TaskStatus.active,
             tasks: {
                 hlocFormat: {
@@ -148,9 +149,9 @@ export class HlocMapManager {
         return allStates;
     }
 
-    private checkIfConfigAlreadyPresent(hlocConfig: HlocConfig): HlocCreator | undefined {
+    private checkIfConfigAlreadyPresent(stageSettings: PipelineStageSettings): HlocCreator | undefined {
         for (const value of this.hlocMaps.values()) {
-            if (_.isEqual(value.getMappingConfig(), hlocConfig)) {
+            if (_.isEqual(value.getStageSettings(), stageSettings)) {
                 return value;
             }
         }
@@ -172,4 +173,34 @@ export class HlocMapManager {
         }
         console.error(`Map ${hlocMapId} not found`);
     }
+}
+
+export function coerceLegacyStageSettings(hlocState: HlocCreationState): PipelineStageSettings {
+    const currentSettings = asRecord(hlocState.stageSettings) ?? {};
+
+    if (Object.keys(currentSettings).length > 0) {
+        return resolvePipelineStageSettings(getHlocStageSettingsSchemas(), currentSettings);
+    }
+
+    const legacyConfig = asRecord(hlocState.mappingConfig);
+    const legacyReconstruction = asRecord(legacyConfig?.hloc_reconstruction) ?? legacyConfig ?? {};
+    const legacyStageSettings = {
+        [HlocConfigurationStage.stageName]: {
+            featureConf: legacyReconstruction.featureConf ?? legacyReconstruction.feature_conf,
+            matcherConf: legacyReconstruction.matcherConf ?? legacyReconstruction.matcher_conf,
+            retrievalConf: legacyReconstruction.retrievalConf ?? legacyReconstruction.retrieval_conf,
+            pairsStrategy: legacyReconstruction.pairsStrategy ?? legacyReconstruction.pairs_strategy,
+        },
+        [HlocMapScaleEstimationStage.stageName]: {
+            mode: legacyReconstruction.mode ?? legacyReconstruction.metric_alignment_mode,
+            minSharedImages: legacyReconstruction.minSharedImages ?? legacyReconstruction.metric_alignment_min_shared_images,
+            minPairDistanceM: legacyReconstruction.minPairDistanceM ?? legacyReconstruction.metric_alignment_min_pair_distance_m,
+        },
+    };
+
+    return resolvePipelineStageSettings(getHlocStageSettingsSchemas(), legacyStageSettings);
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+    return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined;
 }

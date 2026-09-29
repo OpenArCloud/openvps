@@ -10,7 +10,7 @@ import {persistStatus, publishStatusToFrontend} from "./statusPublisher";
 import {UploadLocation} from "./uploadLocation";
 import {EnvironmentalConfig} from "./index";
 import {DataSetStatus, DataSet} from "./dataSet";
-import {HlocConfig} from "./processing/hloc/hlocConfig";
+import {PipelineStageSettings} from "./processing/stageSettings";
 
 export class TaskManager {
     private dataSets = new Map<string, DataSet>();
@@ -60,7 +60,7 @@ export class TaskManager {
     }
 
     public getAllStatuses(): DataSetStatus[] {
-        const statuses: DataSetStatus[] = Array.from(this.dataSets.entries()).map(([id, taskProcessor]) => {
+        const statuses: DataSetStatus[] = Array.from(this.dataSets.values()).map((taskProcessor) => {
             //console.log(` [service] Retrieving status of ${id}`);
             return taskProcessor.getCurrentStatus();
         });
@@ -99,10 +99,10 @@ export class TaskManager {
         }
     }
 
-    public registerHlocConfig(id: string, hlocConfig: HlocConfig) {
+    public registerHlocConfig(id: string, stageSettings: PipelineStageSettings) {
         const dataSet = this.dataSets.get(id);
         if (dataSet) {
-            return dataSet.registerHlocConfig(hlocConfig);
+            return dataSet.registerHlocConfig(stageSettings);
         }
     }
 

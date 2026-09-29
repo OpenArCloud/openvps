@@ -24,7 +24,6 @@ import numpy as np
 import cv2
 
 from hloc_localizer import HlocLocalizer
-from dummy_localizer import DummyLocalizer
 
 from test_gpu import getGpuInfo
 
@@ -51,13 +50,7 @@ app.add_middleware(
 allMapIdsAndPaths: Dict[str, object] = {}
 mapConfigs: Dict[str, object] = {}
 localizers: Dict[str, object] = {}
-
-# NOTE(soeroesg): for educational purposes, we have here a DummyLocalizer
-# which always returns the same GeoPose but can be used for testing the GeoPoseProtocol
-kDummyMapId = "dummy"
-mapConfigs[kDummyMapId] = {}
-localizers[kDummyMapId] = DummyLocalizer()
-currentMapId = kDummyMapId
+currentMapId: Optional[str] = None
 
 access_times: Dict[str, float] = {}
 
@@ -70,24 +63,30 @@ print(getGpuInfo())
 
 
 def _touch_map(map_id: str) -> None:
-    if map_id != kDummyMapId:
-        access_times[map_id] = time.perf_counter()
+    access_times[map_id] = time.perf_counter()
 
 
-def _real_map_count() -> int:
-    return len([k for k in localizers if k != kDummyMapId])
+def _loaded_map_count() -> int:
+    return len(localizers)
+
+
+def _unload_map(map_id: str) -> None:
+    global currentMapId
+    localizer = localizers.pop(map_id, None)
+    if localizer is not None and hasattr(localizer, "close"):
+        localizer.close()
+    mapConfigs.pop(map_id, None)
+    access_times.pop(map_id, None)
+    if currentMapId == map_id:
+        currentMapId = None
 
 
 def _evict_one_lru(exempt: Set[str]) -> None:
-    candidates = [k for k in localizers if k != kDummyMapId and k not in exempt]
+    candidates = [k for k in localizers if k not in exempt]
     if not candidates:
         return
     victim = min(candidates, key=lambda k: access_times.get(k, 0.0))
-    if victim in mapConfigs:
-        del mapConfigs[victim]
-    if victim in localizers:
-        del localizers[victim]
-    access_times.pop(victim, None)
+    _unload_map(victim)
     print(f"# LRU evicted map {victim}")
 
 
@@ -116,12 +115,13 @@ def load_map_core(map_id: str) -> Tuple[bool, str]:
 
     limit = settings.maxLoadedMaps
     if limit > 0:
-        while _real_map_count() >= limit and map_id not in localizers:
-            before = _real_map_count()
+        while _loaded_map_count() >= limit and map_id not in localizers:
+            before = _loaded_map_count()
             _evict_one_lru({map_id})
-            if _real_map_count() == before:
+            if _loaded_map_count() == before:
                 break
 
+    localizer: Optional[HlocLocalizer] = None
     try:
         map_path = allMapIdsAndPaths[map_id]
         config_path = map_path / "config.yaml"
@@ -135,7 +135,8 @@ def load_map_core(map_id: str) -> Tuple[bool, str]:
         try:
             localizer.load_map_transform(transform_path, map_id)
         except Exception as ex:
-            del mapConfigs[map_id]
+            localizer.close()
+            _unload_map(map_id)
             return False, f"Failed to load map transform {map_id}: {ex}"
 
         localizer.load_map(map_config, map_id=map_id)
@@ -144,10 +145,9 @@ def load_map_core(map_id: str) -> Tuple[bool, str]:
         _touch_map(map_id)
         return True, ""
     except Exception as ex:
-        if map_id in mapConfigs:
-            del mapConfigs[map_id]
-        if map_id in localizers:
-            del localizers[map_id]
+        if localizer is not None:
+            localizer.close()
+        _unload_map(map_id)
         return False, f"Failed to load map {map_id}: {ex}"
 
 
@@ -171,7 +171,7 @@ def gpu_info():
 @app.get("/health")
 def health():
     s = get_settings()
-    loaded = [k for k in localizers.keys() if k != kDummyMapId]
+    loaded = list(localizers.keys())
     return {"status": "ok", "workerId": s.workerId, "loaded_map_ids": loaded, "current_map_id": currentMapId}
 
 
@@ -215,11 +215,7 @@ async def load_transform(id: str, response: Response):
 # TODO: change to POST. We have it as GET for now so that it can be triggered simply from a browser
 @app.get("/unload_map/{id}")
 async def unload_map(id: str):
-    if id in mapConfigs:
-        del mapConfigs[id]
-    if id in localizers:
-        del localizers[id]
-    access_times.pop(id, None)
+    _unload_map(id)
     return {"STATUS": f"Unloaded map {id}"}
 
 
@@ -305,7 +301,7 @@ async def localize(request: Request, response: Response):
                 return {"ERROR": err}
             active_id = override_id
         else:
-            if currentMapId == kDummyMapId:
+            if currentMapId is None:
                 errorMessage = "No map is loaded. Load a map with /load_map/{id} first."
                 print(errorMessage)
                 response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR

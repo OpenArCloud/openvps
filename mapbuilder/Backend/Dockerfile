@@ -89,6 +89,10 @@ RUN --mount=type=cache,target=/root/.cache/pip python3 -m pip install --upgrade 
 # Install hloc
 COPY --from=hloc_context . /app/Hierarchical-Localization
 RUN --mount=type=cache,target=/root/.cache/pip python3 -m pip install --no-build-isolation --verbose -e /app/Hierarchical-Localization
+# Install additional dependencies of r2d2 and dir submodules of hloc
+RUN --mount=type=cache,target=/root/.cache/pip python3 -m pip install --verbose \
+    pillow \
+    scikit-learn
 
 # Replace PyTorch with an earlier version if your GPU is not supported by the newest version
 # If you see PyTorch UserWarning: CUDA initialization: The NVIDIA driver on your system is too old (found version xxxx).

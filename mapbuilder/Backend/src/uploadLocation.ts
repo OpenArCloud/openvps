@@ -6,6 +6,7 @@
 
 import path from "node:path";
 import {ProcessMetadata} from "./dataSet";
+import {PipelineStageSettings} from "./processing/stageSettings";
 
 export class UploadLocation {
     private fileStem: string;
@@ -38,6 +39,10 @@ export class UploadLocation {
 
     public getSize(): number {
         return this.metadata.size;
+    }
+
+    public getDatasetSettings(): PipelineStageSettings | undefined {
+        return this.metadata.datasetSettings;
     }
 
     public getDataSetRoot() {

@@ -11,7 +11,10 @@ if (process.env.NODE_ENV === "production") {
 
 export const API_URLS = {
     GET_MAPS: "/maps",
+    GET_MAP: "/maps/:id",
     GET_SELECTED_MAP: "/maps/selected",
+    SETTINGS_HLOC: "/settings/hloc",
+    SETTINGS_HLOC_STAGE: "/settings/hloc/:stageName",
     UPLOAD_STRAY_RECORDING_ZIP: "/uploadStrayRecordingZip",
     HLOC_REGISTER_CONFIG: "/maps/:id/hloc/registerConfig",
     HLOC_START_PROCESSING: "/maps/:id/hloc/:mapId/process",

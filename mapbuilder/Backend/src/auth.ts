@@ -24,9 +24,9 @@ export const authConfig: ExpressAuthConfig = {
             },
             token: {
                 url: process.env.AUTH_FUSIONAUTH_ISSUER + "/oauth2/token",
-                conform: async (response: any) => {
+                conform: async (response: Response) => {
                     if (response.status === 401) return response;
-                    const newHeaders: Headers = (Array.from(response.headers.entries()) as any[])
+                    const newHeaders: Headers = Array.from(response.headers.entries())
                         .filter(([key]) => key.toLowerCase() !== "www-authenticate")
                         .reduce((headers, [key, value]) => (headers.append(key, value), headers), new Headers());
 
@@ -47,7 +47,7 @@ export const authConfig: ExpressAuthConfig = {
             }
             return token;
         },
-        session({session, token}: any) {
+        session({session, token}) {
             //console.log(token);
             session.user.name = token.name;
             return session;

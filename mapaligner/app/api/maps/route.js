@@ -33,11 +33,17 @@ export async function GET() {
   }
   const completedMaps = mapList
     .filter((map) => map.hloc)
-    .flatMap((map) => map.hloc.map((hlocMap) => ({ ...hlocMap, dataSetId: map.metadata.id })))
+    .flatMap((map) =>
+      map.hloc.map((hlocMap) => ({
+        ...hlocMap,
+        dataSetId: map.metadata.id,
+        dataSetName: map.metadata.name,
+      }))
+    )
     .filter((hlocMap) => hlocMap.status === "Completed")
     .map((hlocMap) => ({
       id: hlocMap.mapId,
-      name: hlocMap.mapId.substring(0, 8),
+      name: `${hlocMap.dataSetName || "<unnamed>"} (${hlocMap.mapId.substring(0, 8)})`,
       size: 0,
       type: "hloc",
       dataSetId: hlocMap.dataSetId,

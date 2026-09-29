@@ -28,6 +28,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from pathlib import Path
+import gc
 import json
 import yaml
 
@@ -334,6 +335,35 @@ class HlocLocalizer(BaseLocalizer):
         global_features_path = Path(config['reconstruction_path']) / 'global_features.h5'
         if global_features_path.exists():
             self.load_map_global_features(global_features_path)
+
+
+    def close(self):
+        if hasattr(self, "map_local_descriptors"):
+            try:
+                self.map_local_descriptors.close()
+            except Exception as ex:
+                print(f"Could not close local descriptor file for map {self.map_id}: {ex}")
+
+        for name in (
+            "feature_extractor",
+            "global_feature_extractor",
+            "matcher",
+            "reconstruction",
+            "map_global_descriptors",
+            "map_local_descriptors",
+            "map_image_names",
+            "db_name_to_id",
+            "feature_conf",
+            "matcher_conf",
+            "retrieval_conf",
+            "config",
+        ):
+            if hasattr(self, name):
+                delattr(self, name)
+
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 
     def load_map_transform(self, map_transform_path: Path, map_id: str):

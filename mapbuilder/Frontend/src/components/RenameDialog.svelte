@@ -19,7 +19,7 @@
 
 <Dialog.Root
     closeOnOutsideClick={true}
-    bind:open={$appStore.renameDialog.visible}
+    open={$appStore.renameDialog.visible}
     {onOpenChange}
     closeOnEscape={false}
 >
@@ -29,7 +29,7 @@
         </Dialog.Header>
         <Input type="text" placeholder="" class="max-w-xs" bind:value={mapName} />
         <Dialog.Footer>
-            <Button on:click={() => onOpenChange(false)} variant="outline">Cancel</Button>
+            <Button on:click={() => appStore.setRenameDialogVisible(false)} variant="outline">Cancel</Button>
             <Button type="submit" on:click={() => $appStore.renameDialog.callback(mapName)}>OK</Button>
         </Dialog.Footer>
     </Dialog.Content>

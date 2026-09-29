@@ -79,6 +79,23 @@ def _dds_announce_current() -> None:
         traceback.print_exc()
 
 
+# COLMAP packs camera parameters differently per model, and the leading four are not
+# intrinsics in a fixed order. These two sets are transcribed from COLMAP's own model
+# definitions (src/colmap/sensor/models/*.h): a model whose params_info starts "f, cx, cy"
+# carries one focal length that has to be duplicated, and one starting "fx, fy, cx, cy"
+# already has the four values in the right order. Getting this wrong is not a crash — it
+# silently feeds cx in as fy, which localizes, clears the inlier threshold, and returns a
+# pose metres out. That happened once; hence the explicit lists and the test.
+_SINGLE_FOCAL_MODELS = frozenset({
+    "SIMPLE_PINHOLE", "SIMPLE_RADIAL", "SIMPLE_RADIAL_FISHEYE", "SIMPLE_FISHEYE",
+    "SIMPLE_DIVISION", "RADIAL", "RADIAL_FISHEYE",
+})
+_TWO_FOCAL_MODELS = frozenset({
+    "PINHOLE", "OPENCV", "OPENCV_FISHEYE", "FULL_OPENCV", "FOV", "FISHEYE", "DIVISION",
+    "EUCM", "THIN_PRISM_FISHEYE", "RAD_TAN_THIN_PRISM_FISHEYE",
+})
+
+
 def _pinhole_params(cam):
     """
     (fx, fy, cx, cy) from a COLMAP camera, whatever model it uses.
@@ -90,11 +107,13 @@ def _pinhole_params(cam):
     """
     p = [float(x) for x in cam.params]
     name = cam.model.name if hasattr(cam.model, "name") else str(cam.model)
-    if name in ("SIMPLE_PINHOLE", "SIMPLE_RADIAL", "SIMPLE_RADIAL_FISHEYE", "RADIAL",
-                "RADIAL_FISHEYE"):
+    if name in _SINGLE_FOCAL_MODELS:
         return [p[0], p[0], p[1], p[2]]
-    if len(p) >= 4:
+    if name in _TWO_FOCAL_MODELS:
         return [p[0], p[1], p[2], p[3]]
+    # Refuse rather than guess. EQUIRECTANGULAR carries (w, h) and no focal length at all,
+    # and an unknown model is exactly the case where taking the first four parameters
+    # produces a confident wrong answer.
     raise ValueError(f"cannot derive pinhole intrinsics from camera model {name} with {p}")
 
 

@@ -249,6 +249,14 @@ export default function Matcher() {
                     modified={modified}
                   />
                 </Suspense>
+                <TransformInput
+                  title="Point Size"
+                  value={pointSize}
+                  setter={setPointSize}
+                  min={1}
+                  max={6}
+                  step={1}
+                />
                 <LoadConfig
                   setTranslation={setTranslation}
                   setRotation={setRotation}
@@ -296,14 +304,6 @@ export default function Matcher() {
                     <RotationInput component="y" rotation={rotation} setRotation={setRotation} />
                     <RotationInput component="z" rotation={rotation} setRotation={setRotation} />
                     <ScaleInput scale={scale} setScale={setScale} />
-                    <TransformInput
-                      title="Point Size"
-                      value={pointSize}
-                      setter={setPointSize}
-                      min={1}
-                      max={6}
-                      step={1}
-                    />
                   </div>
                 </details>
                 Matrix:

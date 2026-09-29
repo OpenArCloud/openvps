@@ -25,7 +25,7 @@
             return "?";
         }
         const names = user.split(" ");
-        return names.map((name) => name[0].toUpperCase()).join("");
+        return names.map((name: string) => name[0].toUpperCase()).join("");
     };
 
     const onLogout = async () => {
@@ -40,7 +40,7 @@
 
 <div class="root">
     <div class="title">
-        <p><image src="/OSCAR4US.jpg" alt="OSCAR4US logo" style="float:left;width:50px;height:50px;"/>
+        <p><img src="/OSCAR4US.jpg" alt="OSCAR4US logo" style="float:left;width:50px;height:50px;"/>
         OpenVPS MapBuilder
         </p>
     </div>

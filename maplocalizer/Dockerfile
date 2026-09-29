@@ -129,7 +129,7 @@ COPY . .
 RUN echo "appName=OpenVPS-MapLocalizer" >> server/.env
 RUN echo "uploadsDir=/uploads" >> server/.env
 RUN echo "debug=False" >> server/.env
-RUN echo "maxLoadedMaps=8" >> server/.env
+RUN echo "maxLoadedMaps=1" >> server/.env
 RUN echo "workerId=docker" >> server/.env
 
 # default FastAPI port

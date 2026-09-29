@@ -15,9 +15,10 @@
     import * as Dialog from "$lib/components/ui/dialog";
     import { Input } from "$lib/components/ui/input";
     import { Label } from "$lib/components/ui/label";
-    import { appStore } from "../stores";
+    import { appStore, pipelineSettingsStore, type PipelineStageSettings } from "../stores";
     import { API_URLS, AUTH_ENABLED } from "../config";
     import { getAuthenticationToken } from "../auth";
+    import PipelineSettingsForm from "./PipelineSettingsForm.svelte";
 
     let files: FileList | undefined;
     let mapName: string = "";
@@ -26,6 +27,8 @@
     let uploadProgress: number | undefined;
     let selectedFile = "Choose File";
     let fileInputDom: HTMLInputElement | undefined;
+    let datasetSettings: PipelineStageSettings = {};
+    $: datasetSettingsGroups = $pipelineSettingsStore.value.filter((group) => group.scope === "dataset");
     $: {
         uploadDisabled = files === undefined || files.length === 0 || !mapName;
         if (files) {
@@ -53,6 +56,7 @@
         const formData = new FormData();
         formData.append("file-content", files[0]);
         formData.append("map-name", mapName);
+        formData.append("datasetSettings", JSON.stringify(datasetSettings));
 
         if (AUTH_ENABLED) {
             headers.set("Authorization", `Bearer ${getAuthenticationToken()}`);
@@ -90,7 +94,7 @@
 
 <Dialog.Root
     closeOnOutsideClick={false}
-    bind:open={$appStore.addDialogVisible}
+    open={$appStore.addDialogVisible}
     {onOpenChange}
     closeOnEscape={false}
 >
@@ -128,6 +132,11 @@
                     />
                 </div>
             </div>
+            {#if datasetSettingsGroups.length > 0}
+                <div class="border-t pt-4">
+                    <PipelineSettingsForm groups={datasetSettingsGroups} scopes={["dataset"]} bind:values={datasetSettings} />
+                </div>
+            {/if}
         </div>
         <div class="text-xs italic">
             The recordings are stored only for map generation purposes. You can delete them at any

@@ -120,6 +120,10 @@
         }
     };
 
+    const rowHasSelectedMap = (row: any) => {
+        return Boolean($localizerStore.selectedMap && String(row.cells[3]?.value ?? "").includes($localizerStore.selectedMap));
+    };
+
     $: filteredWorkflows = $processingStore.value.filter((workflow) =>
         getSearchableText(workflow).includes($mapSearchQuery.trim().toLocaleLowerCase()),
     );
@@ -295,10 +299,7 @@
                     <Subscribe rowAttrs={row.attrs()} let:rowAttrs>
                         <Table.Row
                             {...rowAttrs}
-                            style={$localizerStore.selectedMap &&
-                            row.cells[3].value.includes($localizerStore.selectedMap)
-                                ? "background-color:#aaaaaa44"
-                                : ""}
+                            style={rowHasSelectedMap(row) ? "background-color:#aaaaaa44" : ""}
                         >
                             {#each row.cells as cell (cell.id)}
                                 <Subscribe attrs={cell.attrs()} let:attrs>

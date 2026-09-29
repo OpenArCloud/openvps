@@ -11,12 +11,13 @@
     import PencilSvg from "../svg/pencil.svelte";
     import { Button } from "$lib/components/ui/button";
     import * as Tooltip from "$lib/components/ui/tooltip";
-    import { appStore, localizerStore, processingStore, TaskStatus } from "../stores";
+    import { appStore, localizerStore, processingStore, TaskStatus, type PipelineStageSettings } from "../stores";
     import { API_URLS, AUTH_ENABLED } from "../config";
     import MessageDialog from "./MessageDialog.svelte";
     import { getAuthenticationToken } from "../auth";
     import OpenAligner from "../svg/openAligner.svelte";
     import Pin from "../svg/pin.svelte";
+    import EyeSvg from "../svg/eye.svelte";
 
     export let id: string;
     export let name: string;
@@ -65,7 +66,29 @@
         return mapId;
     }
 
+    function getCompletedHlocStages() {
+        if (!processingState) {
+            return [];
+        }
+        const lastHlocMapId = [...processingState.stages.values()]
+            .filter((task) => task.type?.includes("hloc"))
+            .at(-1)?.mapId;
+        if (!lastHlocMapId) {
+            return [];
+        }
+        return [...processingState.stages.values()]
+            .filter((task) => task.mapId === lastHlocMapId && task.status === TaskStatus.completed)
+            .map((task) => task.type);
+    }
+
     const onHlocStartProcessing = () => {
+        $appStore.setRunSettingsDialogInitial({});
+        $appStore.setRunSettingsDialogCompletedStages(getCompletedHlocStages());
+        $appStore.setRunSettingsDialogCallback(registerHlocConfigAndStartProcessing);
+        $appStore.setRunSettingsDialogVisible(true);
+    };
+
+    const registerHlocConfigAndStartProcessing = (stageSettings: PipelineStageSettings) => {
         error = undefined;
         onLoading(true);
         const headers = new Headers();
@@ -76,18 +99,10 @@
         headers.set("Accept", "application/json, text/plain");
         headers.set("Content-Type", "application/json");
 
-        // TODO: add frontend popup window to specify the config parameters. Parameters are harcoded for now.
-        const hlocMappingConfig = {
-            feature_conf: "superpoint_aachen",
-            matcher_conf: "superglue",
-            retrieval_conf: "netvlad",
-            pairs_strategy: "from_retrieval",
-            optimize_poses: true,
-        };
         fetch(API_URLS.HLOC_REGISTER_CONFIG.replace(":id", id), {
             method: "POST",
             headers: headers,
-            body: JSON.stringify(hlocMappingConfig),
+            body: JSON.stringify(stageSettings),
         })
             .then(
                 (response) => {
@@ -233,6 +248,33 @@
         const mapId = getFirstHlocMapId();
         const alignerUrl = API_URLS.MAPALIGNER_URL.replace(":id", mapId).replace(":type", "hloc");
         window.open(alignerUrl, "_blank")?.focus();
+    };
+
+    const onViewAppliedSettings = () => {
+        const mapId = getFirstHlocMapId();
+        const headers = new Headers();
+        if (AUTH_ENABLED) {
+            headers.set("Authorization", `Bearer ${getAuthenticationToken()}`);
+        }
+
+        fetch(API_URLS.GET_MAP.replace(":id", id), { method: "GET", headers })
+            .then(async (response) => {
+                if (!response.ok) {
+                    error = new Error(`${response.status} - ${response.statusText}`);
+                    return;
+                }
+                const dataSetStatus = await response.json();
+                const hlocState = (dataSetStatus.hloc ?? []).find((hloc: { mapId: string }) => hloc.mapId === mapId);
+                const appliedSettings: PipelineStageSettings = {
+                    ...(dataSetStatus.metadata?.datasetSettings ?? {}),
+                    ...(hlocState?.stageSettings ?? {}),
+                };
+                $appStore.setAppliedSettingsDialogContent(name, appliedSettings);
+                $appStore.setAppliedSettingsDialogVisible(true);
+            })
+            .catch((err) => {
+                error = err;
+            });
     };
 
     const onTaskRename = (newName: string) => {
@@ -401,6 +443,20 @@
                 </Button>
             </Tooltip.Trigger>
             <Tooltip.Content>Open Last HLOC Map in Aligner</Tooltip.Content>
+        </Tooltip.Root>
+
+        <Tooltip.Root>
+            <Tooltip.Trigger>
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    class="relative h-8 w-8 p-0"
+                    on:click={onViewAppliedSettings}
+                >
+                    <EyeSvg />
+                </Button>
+            </Tooltip.Trigger>
+            <Tooltip.Content>View Applied Settings</Tooltip.Content>
         </Tooltip.Root>
 
         <Tooltip.Root>

@@ -92,9 +92,9 @@ class BridgeSeesTheService(unittest.TestCase):
 
     def test_advertises_the_registered_response_type(self):
         """
-        The spec's own 3.3.4 example says `geopose` for the result topic. It is wrong — the
-        topic carries VpsResponse, whose registered type is vps_response. A client filtering
-        on the registered name must find this service.
+        The result topic advertises `vps_response`, the type §3.3.2 registers for it, so a
+        client filtering on the registry finds this service. The §3.3.4 example said
+        `geopose` until the spec swept it (SpatialDDS-spec 50feed7).
         """
         a = self._take()
         self.assertIsNotNone(a)

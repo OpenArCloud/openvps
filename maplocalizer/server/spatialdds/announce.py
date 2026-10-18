@@ -146,9 +146,9 @@ def build_announce(
             "preferred_profiles": ["spatial.core/1.8", "spatial.argeo/1.8"],
             "features": ["blob.crc32"],
         },
-        # Advertise vps_response, not geopose. The spec's own §3.3.4 example says `geopose`
-        # here, which predates the batch-3 addition of the vps_response registry row and was
-        # never swept; a client filtering on the registered type would not find this service.
+        # `vps_response` is the registered type for this topic (§3.3.2), and what a client
+        # filtering on the registry looks for. The §3.3.4 example disagreed until the spec
+        # swept it (SpatialDDS-spec 50feed7); this was always the registry's spelling.
         "topics": [
             # `durability` is new in 1.8. Both lanes are VPS_REQ / VPS_RESP, which §3.3.2
             # specifies as Volatile and which our QoS profiles implement as reliable and

@@ -18,6 +18,9 @@ import cyclonedds.idl.types as types
 from spatialdds_idl.spatial.common._types import CovarianceType
 
 # root module import for resolving types
+# generate_types.py: bind the root name the dotted
+# annotations below already use, so get_type_hints works
+import spatialdds_idl
 from spatialdds_idl import spatial
 
 if TYPE_CHECKING:

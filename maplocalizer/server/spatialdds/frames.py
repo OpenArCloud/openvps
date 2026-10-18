@@ -12,22 +12,30 @@ serialises them to JSON. Those are the internal representation, and this module 
 place that turns them into the generated IDL bindings. Keeping the conversion in one file is
 deliberate — two independent definitions of `FramedPose` in one process is how they drift.
 
-**coord_scale.** `FrameRef.coord_scale` is upstream's proposal for declaring what a frame's
-units are; it is not in SpatialDDS 1.6, 1.7 or 1.8, so the generated `FrameRef` has no field
-for it. Until it lands it rides as a `MetaKV` entry under the `openvps.frame` namespace,
-which §2.13's typed-first rule permits for exactly this case. `SCALE_NAMESPACE` and
-`frame_ref_to_idl` are the whole of it: when the field exists natively, this becomes a
-deletion rather than an excavation.
+**Scale is now a wire field.** SpatialDDS 1.8 gives `FrameRef` four members for it —
+`has_scale`, `scale_status`, `meters_per_unit`, `display_unit` — so the `openvps.frame`
+MetaKV convention that stood in for them is gone. The previous version of this module said
+that when the field arrived this would become a deletion rather than an excavation, and it
+did.
 
-Dropping it instead was the alternative and is not acceptable. OpenVPS map frames are not
-metric — a reconstruction from images alone is gauge-free, and the scale is recovered later
-— so a `FramedPose` published without its scale is a plausible pose wrong by a constant
-factor, with nothing on the wire to say so.
+Worth recording why the deletion loses nothing: the convention never reached the wire. Its
+only caller discarded the MetaKV it built (`idl_frame, _meta = frame_ref_to_idl(...)`), so
+every `FramedPose` this service ever published carried a frame that said nothing about its
+units. The announce hint `openvps.coord_scale_m_per_unit` was the only carrier that
+worked, and it still is for discovery — `Announce` has no `FrameRef` for a service's own
+map frame, only `coverage_frame_ref` for the frame coverage is evaluated in. So the hint
+stays; what changes is that a response now states its own units.
+
+**`has_scale = false` is a claim, not a default.** 1.8 reads an unset `has_scale` as
+"this frame is metric, 1 unit = 1 metre", which is correct for every pre-1.8 publisher and
+wrong for every OpenVPS map: a COLMAP frame is gauge-free and its scale is recovered after
+the fact — 0.2417 m/unit on the sample scan. A producer that has not established the scale
+must say so with `SCALE_UNKNOWN`; absence is not the unknown state. So the quartet is
+always set explicitly here, and never left to default.
 """
 
 from __future__ import annotations
 
-import json
 from typing import Optional
 
 from oscp.spatialdds_types import (
@@ -36,24 +44,23 @@ from oscp.spatialdds_types import (
     FramedPose as JsonFramedPose,
 )
 
-from spatialdds_idl.spatial.common import (
+from spatialdds_idl18.spatial.common import (
     CoordConvention as IdlCoordConvention,
     FrameRef as IdlFrameRef,
-    KV,
-    MetaKV,
+    ScaleStatus as IdlScaleStatus,
 )
 from spatialdds_demo.json_mapping import from_json
 from spatialdds_demo.payloads import COV_NONE
-from spatialdds_idl.spatial.core import (
+from spatialdds_idl18.spatial.core import (
     CovMatrix as IdlCovMatrix,
     FramedPose as IdlFramedPose,
     PoseSE3 as IdlPoseSE3,
 )
-from spatialdds_idl.builtin import Time as IdlTime
+from spatialdds_idl18.builtin import Time as IdlTime
 
-# Where the scale rides until the spec has a field for it. Namespaced per the typed-first
-# extension rule; `entries` rather than `json` so it stays inspectable without parsing.
-SCALE_NAMESPACE = "openvps.frame"
+# `display_unit` is presentation only — 1.8 says it is never used for computation, so
+# `meters_per_unit` is the single source of truth and this is a label beside it.
+DISPLAY_UNIT_METRE = "m"
 
 _CONVENTION = {
     JsonCoordConvention.ENU: IdlCoordConvention.ENU,
@@ -71,24 +78,34 @@ def convention_to_idl(c: JsonCoordConvention) -> IdlCoordConvention:
 
 def frame_ref_to_idl(fr: JsonFrameRef) -> IdlFrameRef:
     """
-    The wire `FrameRef`, with the scale carried as MetaKV.
+    The wire `FrameRef`, with scale stated natively.
 
     `has_coord_convention` is set explicitly even when the value is the ENU default: §2.12
     asks producers to say so rather than rely on the default, and the localizer always knows
-    which convention its map frame uses.
+    which convention its map frame uses. The scale quartet is set for the same reason and a
+    stronger one — see the module docstring on `has_scale` being a claim.
+
+    `scale_status` distinguishes a scale the producer asserts from one recovered from a
+    similarity transform, which is a distinction the loader already makes and previously had
+    nowhere to put: `MapTransformInfo.from_transform_json` takes the value from
+    `frame_ref.coord_scale` when the file carries one and otherwise takes the norm of the
+    map-to-ENU matrix. The first is `SCALE_DECLARED`, the second is `SCALE_DERIVED` — the
+    spec's own gloss for it is "recovered (e.g. from a legacy similarity transform)", which
+    is exactly what that norm is.
     """
-    meta = []
     if fr.has_coord_scale and fr.coord_scale is not None:
-        meta.append(
-            MetaKV(
-                namespace=SCALE_NAMESPACE,
-                json=json.dumps(fr.coord_scale.to_json_dict(), separators=(",", ":")),
-                entries=[
-                    KV(key="coord_scale.target_unit", value=str(fr.coord_scale.target_unit.value)),
-                    KV(key="coord_scale.scale_factor", value=repr(float(fr.coord_scale.scale_factor))),
-                ],
-            )
-        )
+        has_scale = True
+        scale_status = (IdlScaleStatus.SCALE_DECLARED if fr.coord_scale_declared
+                        else IdlScaleStatus.SCALE_DERIVED)
+        meters_per_unit = float(fr.coord_scale.scale_factor)
+        display_unit = DISPLAY_UNIT_METRE
+    else:
+        # Not established. `has_scale` still true, because false would assert metric.
+        has_scale = True
+        scale_status = IdlScaleStatus.SCALE_UNKNOWN
+        meters_per_unit = 0.0
+        display_unit = ""
+
     return IdlFrameRef(
         uuid=str(fr.uuid),
         fqn=str(fr.fqn),
@@ -96,7 +113,11 @@ def frame_ref_to_idl(fr: JsonFrameRef) -> IdlFrameRef:
         coord_convention=convention_to_idl(
             fr.coord_convention if fr.has_coord_convention else JsonCoordConvention.ENU
         ),
-    ), meta
+        has_scale=has_scale,
+        scale_status=scale_status,
+        meters_per_unit=meters_per_unit,
+        display_unit=display_unit,
+    )
 
 
 def scale_factor_of(fr: JsonFrameRef) -> Optional[float]:
@@ -113,15 +134,15 @@ def framed_pose_to_idl(fp: JsonFramedPose, stamp: IdlTime) -> IdlFramedPose:
     The translation stays in the map's own units. It is *not* pre-multiplied by the scale
     factor: doing that would make the poses inconsistent with the map's own geometry — point
     clouds, meshes, tiles are all in map units — which moves the problem rather than solving
-    it. The units are declared on the frame instead; see the module docstring.
+    it. The units are declared on the frame instead, which under 1.8 is somewhere a consumer
+    can actually read them.
     """
-    idl_frame, _meta = frame_ref_to_idl(fp.frame_ref)
     return IdlFramedPose(
         pose=IdlPoseSE3(
             t=[float(fp.pose.t.x), float(fp.pose.t.y), float(fp.pose.t.z)],
             q=[float(fp.pose.q.x), float(fp.pose.q.y), float(fp.pose.q.z), float(fp.pose.q.w)],
         ),
-        frame_ref=idl_frame,
+        frame_ref=frame_ref_to_idl(fp.frame_ref),
         cov=_cov_none(),
         stamp=stamp,
     )

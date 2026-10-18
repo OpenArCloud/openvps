@@ -141,14 +141,18 @@ class MapTransformInfo:
                 coord_conv = CoordConvention.CV
             if fr_in.has_coord_scale and fr_in.coord_scale is not None:
                 cs = fr_in.coord_scale
+                cs_declared = True
             else:
                 cs = derived_cs
+                cs_declared = False
         else:
             raw_cs = data.get("coord_scale")
             if raw_cs is not None:
                 cs = CoordScale.from_json(raw_cs)
+                cs_declared = True
             else:
                 cs = derived_cs
+                cs_declared = False
             coord_conv = cls._coord_convention_from_transform_json(data)
         if cs.target_unit != CoordScaleTargetUnit.SI_METER:
             raise ValueError(
@@ -162,6 +166,7 @@ class MapTransformInfo:
             has_coord_scale=True,
             coord_scale=cs,
             meta_kv=meta_kv,
+            coord_scale_declared=cs_declared,
         )
         return cls(
             map_to_enu_transform=T,

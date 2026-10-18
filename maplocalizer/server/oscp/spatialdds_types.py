@@ -137,6 +137,7 @@ class FrameRef(object):
         has_coord_scale: bool = False,
         coord_scale: Optional[CoordScale] = None,
         meta_kv: Optional[list[MetaKV]] = None,
+        coord_scale_declared: bool = False,
     ):
         self.uuid = str(uuid)
         self.fqn = str(fqn)
@@ -145,6 +146,13 @@ class FrameRef(object):
         self.has_coord_scale = bool(has_coord_scale)
         self.coord_scale = coord_scale
         self.meta_kv = meta_kv if meta_kv is not None else None
+        # How the scale was obtained: True when a producer stated it, False when it was
+        # recovered (for us, the norm of the map-to-ENU matrix). SpatialDDS 1.8 draws this
+        # distinction as FrameRef.scale_status DECLARED vs DERIVED; before 1.8 there was
+        # nowhere to put it, so it was not carried. Deliberately absent from
+        # to_json_dict(): the HTTP contract is unchanged by this field, and the default is
+        # the conservative reading of a frame whose provenance nobody recorded.
+        self.coord_scale_declared = bool(coord_scale_declared)
 
     def to_json_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"uuid": self.uuid, "fqn": self.fqn}

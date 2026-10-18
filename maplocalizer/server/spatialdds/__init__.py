@@ -4,4 +4,4 @@
 #
 # This file is part of OpenVPS: Open Visual Positioning Service
 #
-# SpatialDDS 1.7 VPS binding for the MapLocalizer.
+# SpatialDDS 1.8 VPS binding for the MapLocalizer.

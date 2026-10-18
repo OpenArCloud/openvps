@@ -28,9 +28,12 @@ os.environ.setdefault("CYCLONEDDS_URI",
 
 from cyclonedds.domain import DomainParticipant                    # noqa: E402
 from spatialdds_demo import blob as blobmod, typed_transport as tt  # noqa: E402
-from spatialdds_idl.spatial.argeo import VpsRequest, VpsResponse, VpsStatus  # noqa: E402
-from spatialdds_idl.spatial.core import BlobChunk, BlobRef          # noqa: E402
-from spatialdds_idl.spatial.common import FrameRef as IdlFrameRef   # noqa: E402
+from spatialdds_idl18.spatial.argeo import VpsRequest, VpsResponse, VpsStatus  # noqa: E402
+from spatialdds_idl18.spatial.core import BlobChunk, BlobRef          # noqa: E402
+from spatialdds_idl18.spatial.common import (                        # noqa: E402
+    FrameRef as IdlFrameRef,
+    ScaleStatus as IdlScaleStatus,
+)
 
 from oscp.geopose import GeoPose, Position, Quaternion              # noqa: E402
 from oscp.spatialdds_types import (                                 # noqa: E402
@@ -91,8 +94,7 @@ class VpsBinding(unittest.TestCase):
         ref = blobmod.blob_ref(blob_id, role, image)
         self.req_w.write(VpsRequest(
             query_id=qid, service_id=service_id,
-            client_frame_ref=IdlFrameRef(uuid="c", fqn="client/body",
-                                         has_coord_convention=False, coord_convention=0),
+            client_frame_ref=_client_frame(),
             has_prior_geopose=False, prior_geopose=svc._empty_geopose(),
             query_blobs=[BlobRef(blob_id=ref["blob_id"], role=ref["role"],
                                  checksum=ref["checksum"])],
@@ -100,7 +102,7 @@ class VpsBinding(unittest.TestCase):
             quality_requirements=None if False else _qr(),
             stamp=svc.now_time(),
         ))
-        for c in blobmod.chunk(blob_id, image):
+        for c in blobmod.chunk(blob_id, image, cls=BlobChunk):
             self.blob_w.write(c)
         return qid
 
@@ -141,6 +143,54 @@ class VpsBinding(unittest.TestCase):
         self.assertAlmostEqual(fp.pose.t[2], 3.25, places=6)
         self.assertEqual(str(fp.frame_ref.coord_convention).rsplit(".", 1)[-1], "CV")
         self.assertEqual(fp.frame_ref.fqn, f"openvps/hloc/{MAP_ID}/colmap_world")
+
+    def test_scale_is_stated_on_the_wire(self):
+        """The response's frame carries the map's metric scale, natively.
+
+        This is the assertion that F1 is fixed, and it is deliberately an assertion about
+        what *arrives* rather than about what the conversion builds. Before 1.8 the scale
+        rode as a MetaKV that `frame_ref_to_idl` built and its only caller threw away
+        (`idl_frame, _meta = ...`), so every published FramedPose named a frame that said
+        nothing about its units. A test on the conversion would have passed throughout. The
+        only test that could not is one that takes the sample off the bus and reads it.
+
+        `SCALE_DERIVED`, not `SCALE_DECLARED`: this map's factor came from the norm of the
+        map-to-ENU matrix, which is the spec's own example of a recovered scale. And
+        `has_scale` must be true — false is not neutral, it is a claim that one map unit is
+        one metre, which on a COLMAP frame is wrong by a factor of four.
+        """
+        qid = self._send()
+        r = self._pump(qid)
+        self.assertIsNotNone(r, "no reply")
+        fr = r.node_geo.poses[0].frame_ref
+        self.assertTrue(fr.has_scale, "has_scale false asserts metric, which this is not")
+        self.assertEqual(str(fr.scale_status).rsplit(".", 1)[-1], "SCALE_DERIVED")
+        self.assertAlmostEqual(fr.meters_per_unit, SCALE, places=6)
+        self.assertEqual(fr.display_unit, "m")
+        # The translation is still raw map units: the scale is declared, not applied.
+        self.assertAlmostEqual(r.node_geo.poses[0].pose.t[0], 1.5, places=6)
+
+    def test_unknown_scale_says_unknown_rather_than_metric(self):
+        """A frame whose scale was never established must say so.
+
+        1.8 is explicit that absence is not the unknown state: `has_scale == false` means
+        the frame is metric. So a map with no scale has to set `has_scale` true and
+        `SCALE_UNKNOWN`, which is the one case where the quartet carries no number.
+        """
+        fr = FrameRef(uuid=MAP_ID, fqn="openvps/hloc/nos/colmap_world",
+                      has_coord_convention=True, coord_convention=CoordConvention.CV,
+                      has_coord_scale=False)
+        self.outcome = svc.LocalizeOutcome(
+            framed_poses=[FramedPose(
+                pose=PoseSE3(Vec3(1.0, 2.0, 3.0), QuaternionXYZW(0.0, 0.0, 0.0, 1.0)),
+                frame_ref=fr, cov=CovMatrix())],
+            geoposes=[], confidence=0.5, map_id=MAP_ID, georeferenced=False)
+        qid = self._send()
+        r = self._pump(qid)
+        self.assertIsNotNone(r, "no reply")
+        got = r.node_geo.poses[0].frame_ref
+        self.assertTrue(got.has_scale)
+        self.assertEqual(str(got.scale_status).rsplit(".", 1)[-1], "SCALE_UNKNOWN")
 
     def test_geopose_present_when_georeferenced(self):
         qid = self._send()
@@ -190,8 +240,7 @@ class VpsBinding(unittest.TestCase):
         ref = blobmod.blob_ref(blob_id, svc.ROLE_QUERY_IMAGE, self.IMAGE)
         self.req_w.write(VpsRequest(
             query_id=qid, service_id=SERVICE_ID,
-            client_frame_ref=IdlFrameRef(uuid="c", fqn="client/body",
-                                         has_coord_convention=False, coord_convention=0),
+            client_frame_ref=_client_frame(),
             has_prior_geopose=False, prior_geopose=svc._empty_geopose(),
             query_blobs=[BlobRef(blob_id=ref["blob_id"], role=ref["role"],
                                  checksum=ref["checksum"])],
@@ -204,8 +253,22 @@ class VpsBinding(unittest.TestCase):
         self.assertFalse(r.has_node_geo)
 
 
+def _client_frame() -> IdlFrameRef:
+    """A client's body frame: metric, and saying so.
+
+    Under 1.8 the scale quartet is not optional padding — leaving `has_scale` false would
+    be a claim that the frame is metric rather than a statement that nothing was said. For
+    a client body frame metric happens to be true, so this is the SCALE_DECLARED case, and
+    it is the one the service's own map frame is not (see test_scale_is_stated_on_the_wire).
+    """
+    return IdlFrameRef(
+        uuid="c", fqn="client/body", has_coord_convention=False, coord_convention=0,
+        has_scale=True, scale_status=IdlScaleStatus.SCALE_DECLARED,
+        meters_per_unit=1.0, display_unit="m")
+
+
 def _qr():
-    from spatialdds_idl.spatial.argeo import QualityRequirements
+    from spatialdds_idl18.spatial.argeo import QualityRequirements
     return QualityRequirements(max_rmse_m=0.0, min_confidence=0.0)
 
 

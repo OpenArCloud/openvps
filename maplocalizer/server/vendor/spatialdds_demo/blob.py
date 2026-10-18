@@ -37,15 +37,22 @@ BLOB_PROFILE = "GEOM_TILE"
 
 
 def chunk(blob_id: str, data: bytes,
-          max_bytes: int = MAX_CHUNK_BYTES) -> Iterator[BlobChunk]:
-    """Split ``data`` into ``BlobChunk`` samples, each with its own CRC32."""
+          max_bytes: int = MAX_CHUNK_BYTES, cls=BlobChunk) -> Iterator[BlobChunk]:
+    """Split ``data`` into ``BlobChunk`` samples, each with its own CRC32.
+
+    ``cls`` names which generated ``BlobChunk`` to build. The type is member-identical
+    between SpatialDDS 1.7 and 1.8, so this changes nothing on the wire — but
+    cyclonedds-python checks Python class identity on ``write()``, so a writer created with
+    the 1.8 class refuses a sample built from the 1.7 one in the same process. Defaults to
+    the 1.7 binding this module has always used, so existing callers are unaffected.
+    """
     if max_bytes > MAX_CHUNK_BYTES:
         raise ValueError(
             f"{max_bytes} exceeds the binding's {MAX_CHUNK_BYTES}-byte ceiling")
     pieces = [data[i:i + max_bytes] for i in range(0, len(data), max_bytes)] or [b""]
     total = len(pieces)
     for index, piece in enumerate(pieces):
-        yield BlobChunk(
+        yield cls(
             blob_id=str(blob_id), index=index, total_chunks=total,
             crc32=zlib.crc32(piece) & 0xFFFFFFFF, data=list(piece),
         )

@@ -15,7 +15,7 @@ dies without disposing ages off the bus rather than lingering.
 not obvious and is easy to get wrong in the permissive direction. Since upstream b2dff1f a
 map gets a metric scale automatically during mapping, but its geodetic fields stay null until
 someone georeferences it — so a freshly built map is localizable, metric, and has no position
-on Earth. Coverage in 1.7 is entirely geographic, so such a map has nothing truthful to put in
+on Earth. Coverage is entirely geographic, so such a map has nothing truthful to put in
 a CoverageElement. Announcing it with empty or global coverage would be worse than silence: it
 would match every coverage query and then return a pose no client can place. It stays fully
 usable over HTTP and to a DDS client that already knows it; it is simply not discoverable.
@@ -127,30 +127,38 @@ def build_announce(
         {"key": "openvps.min_inliers", "value": str(int(min_inliers))},
     ]
     if scale_factor is not None:
-        # Until FrameRef carries scale natively, this is the only place a discovering client
-        # can learn the map frame's units without first making a query.
+        # Still the only place a discovering client learns the map frame's units without
+        # making a query. 1.8's FrameRef scale members fixed the *response* path, not this
+        # one: `Announce` has no FrameRef for a service's own map frame — `coverage_frame_ref`
+        # is the frame coverage is evaluated in, which for us is earth-fixed. So this hint
+        # does not retire with the MetaKV convention it used to sit beside.
         hints.append({"key": "openvps.coord_scale_m_per_unit", "value": repr(float(scale_factor))})
 
     return {
         "service_id": service_id,
         "name": f"OpenVPS {map_id}",
         "kind": SERVICE_KIND_VPS,
-        "version": "1.7",
+        "version": "1.8",
         "org": org,
         "hints": hints,
         "caps": {
             "supported_profiles": [],
-            "preferred_profiles": ["spatial.core/1.7", "spatial.argeo/1.7"],
+            "preferred_profiles": ["spatial.core/1.8", "spatial.argeo/1.8"],
             "features": ["blob.crc32"],
         },
         # Advertise vps_response, not geopose. The spec's own §3.3.4 example says `geopose`
         # here, which predates the batch-3 addition of the vps_response registry row and was
         # never swept; a client filtering on the registered type would not find this service.
         "topics": [
+            # `durability` is new in 1.8. Both lanes are VPS_REQ / VPS_RESP, which §3.3.2
+            # specifies as Volatile and which our QoS profiles implement as reliable and
+            # unlatched — so the announce states it instead of a bridged gateway inferring it.
             {"name": "spatialdds/vps/query/v1", "type": "vps_query", "version": "v1",
-             "qos_profile": "VPS_REQ", "target_rate_hz": 0.0, "max_chunk_bytes": 65535},
+             "qos_profile": "VPS_REQ", "target_rate_hz": 0.0, "max_chunk_bytes": 65535,
+             "durability": "VOLATILE"},
             {"name": "spatialdds/vps/result/v1", "type": "vps_response", "version": "v1",
-             "qos_profile": "VPS_RESP", "target_rate_hz": 0.0, "max_chunk_bytes": 0},
+             "qos_profile": "VPS_RESP", "target_rate_hz": 0.0, "max_chunk_bytes": 0,
+             "durability": "VOLATILE"},
         ],
         # Every member is set, including the ones this service does not use. They are real
         # struct members, not optional keys, and the presence flags are what say which
@@ -168,8 +176,12 @@ def build_announce(
             "circle_radius_m": 0.0,
             "global": False,
             "has_frame_ref": False,
+            # A placeholder, since has_frame_ref is false and coverage_frame_ref applies.
+            # Still eight members under 1.8: they are struct members, not optional keys.
             "frame_ref": {"uuid": "", "fqn": "", "has_coord_convention": False,
-                          "coord_convention": "ENU"},
+                          "coord_convention": "ENU", "has_scale": True,
+                          "scale_status": "SCALE_UNKNOWN", "meters_per_unit": 0.0,
+                          "display_unit": ""},
             "has_coverage_window": False,
             "coverage_window_start": {"sec": 0, "nanosec": 0},
             "coverage_window_end": {"sec": 0, "nanosec": 0},
@@ -177,6 +189,12 @@ def build_announce(
         "coverage_frame_ref": {
             "uuid": "earth-fixed", "fqn": "earth-fixed",
             "has_coord_convention": True, "coord_convention": "ENU",
+            # SCALE_UNKNOWN, and not a dodge. The coverage bbox is EPSG:4326 degrees, so
+            # there is no constant metres-per-unit for this frame — it varies with latitude.
+            # `has_scale: False` would be the wrong answer rather than a neutral one: 1.8
+            # reads that as "1 unit = 1 metre", which for a geodetic frame is false.
+            "has_scale": True, "scale_status": "SCALE_UNKNOWN",
+            "meters_per_unit": 0.0, "display_unit": "",
         },
         "has_coverage_eval_time": False,
         "coverage_eval_time": {"sec": 0, "nanosec": 0},
@@ -208,7 +226,7 @@ class ServiceAnnouncer:
     def __init__(self, participant, service_id_base: str, org: str,
                  *, pad_m: float = DEFAULT_COVERAGE_PAD_M, ttl_sec: int = DEFAULT_TTL_SEC):
         from spatialdds_demo import typed_transport as tt
-        from spatialdds_idl.spatial.disco import Announce
+        from spatialdds_idl18.spatial.disco import Announce
 
         self._Announce = Announce
         self._tt = tt
@@ -233,7 +251,7 @@ class ServiceAnnouncer:
 
         Not announceable means no geodetic anchor: since b2dff1f a map gets metric scale
         during mapping but stays ungeoreferenced until someone georeferences it, and coverage
-        in 1.7 is entirely geographic. Such a map is localizable and has no position on
+        is entirely geographic. Such a map is localizable and has no position on
         Earth, so there is nothing truthful to advertise. It stays usable over HTTP and to a
         client that already knows it.
         """
@@ -309,6 +327,13 @@ class ServiceAnnouncer:
         parent, i.e. the inverse of what is held here. Transform's from/to needs no
         inversion. Rotation only — the scale is declared on the frame, so what remains is
         rigid and fits PoseSE3.
+
+        Under 1.8 the `from` frame is where the map frame's scale finally belongs on this
+        lane: it is a FrameRef for the map frame itself, so it carries the same
+        meters_per_unit the response's FramedPose does, from the same source, and the two
+        cannot disagree. The `openvps.coord_scale_m_per_unit` hint is therefore redundant
+        for a 1.8 consumer — it is kept because deployed clients read it, and removing a
+        working carrier to celebrate a new one would break them for nothing.
         """
         import numpy as _np
         from scipy.spatial.transform import Rotation as _R
@@ -318,11 +343,30 @@ class ServiceAnnouncer:
         norms = _np.linalg.norm(L, axis=0)
         s = float(_np.mean(norms)) if _np.all(norms > 1e-12) else 1.0
         q = _R.from_matrix(L / s).as_quat()      # scipy returns x, y, z, w
+        # Same source as the response path, so announce and response agree by construction.
+        fr = getattr(mt, "frame_ref", None)
+        cs = getattr(fr, "coord_scale", None) if fr is not None else None
+        if cs is not None:
+            from_scale = {
+                "has_scale": True,
+                "scale_status": ("SCALE_DECLARED" if getattr(fr, "coord_scale_declared", False)
+                                 else "SCALE_DERIVED"),
+                "meters_per_unit": float(cs.scale_factor),
+                "display_unit": "m",
+            }
+        else:
+            # Not established. Not `has_scale: False`, which would assert metric.
+            from_scale = {"has_scale": True, "scale_status": "SCALE_UNKNOWN",
+                          "meters_per_unit": 0.0, "display_unit": ""}
+
         return [{
             "from": {"uuid": str(map_id), "fqn": f"openvps/hloc/{map_id}/colmap_world",
-                     "has_coord_convention": True, "coord_convention": "CV"},
+                     "has_coord_convention": True, "coord_convention": "CV", **from_scale},
+            # earth-fixed here carries the ENU tangent frame, whose units are metres.
             "to": {"uuid": "earth-fixed", "fqn": "earth-fixed",
-                   "has_coord_convention": True, "coord_convention": "ENU"},
+                   "has_coord_convention": True, "coord_convention": "ENU",
+                   "has_scale": True, "scale_status": "SCALE_DECLARED",
+                   "meters_per_unit": 1.0, "display_unit": "m"},
             "pose": {"t": [float(T[0, 3]), float(T[1, 3]), float(T[2, 3])],
                      "q": [float(q[0]), float(q[1]), float(q[2]), float(q[3])]},
             "stamp": {"sec": 0, "nanosec": 0},

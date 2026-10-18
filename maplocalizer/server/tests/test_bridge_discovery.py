@@ -40,7 +40,7 @@ os.environ.setdefault(
 from cyclonedds.domain import DomainParticipant                       # noqa: E402
 from spatialdds_demo import typed_transport as tt                     # noqa: E402
 from spatialdds_demo.json_mapping import from_json                    # noqa: E402
-from spatialdds_idl.spatial.disco import Announce                     # noqa: E402
+from spatialdds_idl18.spatial.disco import Announce                     # noqa: E402
 
 import spatialdds.announce as ann                                     # noqa: E402
 import spatialdds.service as svc                                      # noqa: E402
@@ -130,13 +130,22 @@ class BridgeSeesTheService(unittest.TestCase):
 
     def test_scale_is_discoverable_without_a_query(self):
         """
-        The map frame's units are not metric, and 1.7 has no field for that. Until it does,
-        a discovering client can only learn the factor from the announce.
+        A client learns the map frame's units from the announce alone, via the hint.
+
+        The map frame is not metric, so this is not cosmetic: a consumer that reads the
+        coverage and then a pose, without this, is off by a factor of four.
+
+        1.8 adds a native carrier beside it — `transforms[].from` is a `FrameRef` for the
+        map frame itself — but that entry is built by `ServiceAnnouncer` rather than
+        `build_announce`, so it is asserted in test_announcer_lifecycle where the real
+        announcer runs. The hint is kept for clients already reading it: dropping a working
+        carrier to mark the arrival of a better one would break them for nothing.
         """
         a = self._take()
         hints = {h.key: h.value for h in a.hints}
         self.assertEqual(hints["openvps.map_id"], MAP_ID)
         self.assertAlmostEqual(float(hints["openvps.coord_scale_m_per_unit"]), 0.241733, places=6)
+
 
 
 class CoverageRequiresGeoreference(unittest.TestCase):

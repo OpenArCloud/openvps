@@ -31,7 +31,7 @@ os.environ.setdefault(
 
 from cyclonedds.domain import DomainParticipant                    # noqa: E402
 from spatialdds_demo import typed_transport as tt                  # noqa: E402
-from spatialdds_idl.spatial.disco import Announce                  # noqa: E402
+from spatialdds_idl18.spatial.disco import Announce                  # noqa: E402
 
 from oscp.geopose import Position                                  # noqa: E402
 from oscp.spatialdds_types import (                                # noqa: E402
@@ -111,6 +111,33 @@ class AnnouncerLifecycle(unittest.TestCase):
         ok = self.announcer.set_map("mapB", _Localizer("mapB", georeferenced=False))
         self.assertFalse(ok)
         self.assertNotIn(f"{self.BASE};v=mapB", self._live())
+
+    def test_the_announced_transform_states_the_map_frames_scale(self):
+        """The announce's own `from` frame carries the scale, natively.
+
+        New in 1.8 and the better of the two carriers: `transforms[].from` is a `FrameRef`
+        for the map frame itself, taken from the same `MapTransformInfo.frame_ref` the
+        response path uses, so the announce and a subsequent pose cannot disagree about what
+        a map unit means. Before 1.8 this FrameRef had four members and structurally could
+        not say it.
+
+        Asserted against the announcer's own published payload rather than a rebuilt one,
+        because what a consumer gets is the only thing that matters here.
+        """
+        self.assertTrue(self.announcer.set_map("mapA", _Localizer("mapA")))
+        sid, payload, _sample = self.announcer._current
+        self.assertEqual(sid, f"{self.BASE};v=mapA")
+        src = payload["transforms"][0]["from"]
+        self.assertEqual(src["fqn"], "openvps/hloc/mapA/colmap_world")
+        self.assertTrue(src["has_scale"],
+                        "has_scale false would assert the map frame is metric")
+        self.assertEqual(src["scale_status"], "SCALE_DERIVED")
+        self.assertAlmostEqual(src["meters_per_unit"], SCALE, places=9)
+        self.assertEqual(src["display_unit"], "m")
+        # earth-fixed is the metric side of the pair, and says so.
+        dst = payload["transforms"][0]["to"]
+        self.assertEqual(dst["scale_status"], "SCALE_DECLARED")
+        self.assertAlmostEqual(dst["meters_per_unit"], 1.0, places=9)
 
     def test_swapping_maps_replaces_the_announcement(self):
         self.announcer.set_map("mapA", _Localizer("mapA"))

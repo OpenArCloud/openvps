@@ -11,10 +11,33 @@ ImportError one build later.
 
 | Path | Why it is here |
 |---|---|
-| `spatialdds_idl/` | Generated Python bindings for the SpatialDDS 1.7 IDL (`idlc -l py`). Checked in upstream, so neither `idlc` nor Docker is needed to build. |
+| `spatialdds_idl/` | Generated Python bindings for the SpatialDDS **1.7** IDL (`idlc -l py`). Checked in upstream, so neither `idlc` nor Docker is needed to build. Kept because `oarc_demo` — the demo's own non-spec module — has no 1.8 version by design, and `bridges/web_bridge/server.py` imports `CatalogQuery` from it. |
+| `spatialdds_idl18/` | Generated bindings for the SpatialDDS **1.8** IDL. What the VPS integration publishes and subscribes. Generated from `OpenArCloud/SpatialDDS-spec` at **`5ee5f96`**, `idl/v1.8`, git tree `54a3529fbc1d51d3f5518eb76acfd26aa9c17429`; the regeneration command is in its `__init__.py`. Reproduces the demo's own `spatialdds_idl18` byte for byte. |
 | `spatialdds_demo/` | The demo's runtime package: QoS profiles, typed transport, blob chunking, JSON mapping, discovery over bus and HTTP, the topic registry, service and client loops. |
 | `spatialdds_validation.py` | Coverage and manifest validation. Imported by `discovery_http`. |
 | `spatialdds_test.py` | **Test harness, and it should not be needed.** `bridges/web_bridge/server.py` imports `MockSensorData` from it for a `blob_ref` helper that `spatialdds_demo.blob.blob_ref` already provides. Vendored unmodified rather than patched, per the rule against forking the demo. Reported upstream. |
+
+## The two local edits, and why each one is not a fork
+
+"Do not edit these files here" holds, and these are the exceptions. Both are recorded
+because an unrecorded edit to vendored code is found by the next person who re-copies
+upstream and silently loses it.
+
+- **`spatialdds_idl/**` — the root-package binding, 17 files, each exactly +3/-0.** idlc
+  annotates nested members with fully-qualified strings and imports only `spatial` from the
+  root package, so `typing.get_type_hints()` raised `NameError` on 92 of the 113 generated
+  dataclasses here. This is a **forward-port, not a fork**: the same fix is upstream as
+  SpatialDDS-demo `b856788`, and re-copying from a demo commit at or after it brings the
+  same change. `tests/test_generated_types.py` is the gate.
+- **`spatialdds_demo/blob.py` — `chunk()` takes an optional `cls`.** Additive, defaulting
+  to the 1.7 binding the module already used, so every existing caller is unchanged.
+  Needed because cyclonedds-python checks Python class identity in `write()`: a writer
+  created with the 1.8 `BlobChunk` refuses a sample built from the 1.7 class in the same
+  process, even though the type is member-identical and the two interoperate on the wire.
+  Not reported upstream as a defect — the demo has no reason to want it until it carries
+  two eras at once.
+
+## QoS
 
 Two of the QoS details are load-bearing and easy to undo by accident. Deadline is a
 request/offered policy, so a reader asking 33 ms does not match a writer offering none and

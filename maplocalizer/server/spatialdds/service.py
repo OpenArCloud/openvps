@@ -4,7 +4,7 @@
 #
 # This file is part of OpenVPS: Open Visual Positioning Service
 """
-The SpatialDDS 1.7 VPS binding: `vps_query` in, `vps_response` out.
+The SpatialDDS 1.8 VPS binding: `vps_query` in, `vps_response` out.
 
 This is the request/reply binding the spec registers — `argeo::VpsRequest` and
 `VpsResponse` correlated by `query_id` on the `VPS_REQ` / `VPS_RESP` profiles. Streaming was
@@ -23,6 +23,21 @@ Localization runs on one worker. The GPU serialises anyway, and the HTTP path is
 using it, so both surfaces queue through the same executor rather than contending through
 the GIL. That does not fix the pre-existing problem of the HTTP handler calling a blocking
 GPU routine on the event loop — it avoids making it worse.
+
+**Known limitation: `query_stream_id` is ignored, so a foreign camera gets a wrong fix.**
+This path localizes every query against the loaded map's own intrinsics. A request whose
+imagery came from a different camera is therefore answered confidently and wrongly, which is
+the same failure mode as the SIMPLE_RADIAL bug — plausible, `VPS_SUCCESS`, metres out.
+
+The spec has somewhere to put the answer and has since 1.7: `VpsRequest.query_stream_id`
+names the camera stream whose `VisionMeta.K` carries the intrinsics, and `CamIntrinsics`
+has `model`, `width`, `height`, `fx`, `fy`, `cx`, `cy`, `dist` and `dist_params` — more than
+the localizer needs. Reading it means subscribing to the vision meta lane and keying
+intrinsics per stream, which is a batch of its own.
+
+Recorded here rather than in a report because this is where somebody debugging a wrong fix
+from an unfamiliar client will be reading. It is an unimplemented field, not a gap in the
+specification — an earlier note of mine said otherwise and was wrong.
 """
 
 from __future__ import annotations
@@ -37,9 +52,9 @@ from spatialdds_demo import blob as blobmod
 from spatialdds_demo import typed_transport as tt
 from spatialdds_demo.json_mapping import from_json
 from spatialdds_demo.payloads import COV_NONE
-from spatialdds_idl.builtin import Time as IdlTime
-from spatialdds_idl.spatial.argeo import NodeGeo, VpsRequest, VpsResponse, VpsStatus
-from spatialdds_idl.spatial.core import BlobChunk, GeoPose as IdlGeoPose
+from spatialdds_idl18.builtin import Time as IdlTime
+from spatialdds_idl18.spatial.argeo import NodeGeo, VpsRequest, VpsResponse, VpsStatus
+from spatialdds_idl18.spatial.core import BlobChunk, GeoPose as IdlGeoPose
 
 from spatialdds.frames import framed_pose_to_idl
 
@@ -342,7 +357,7 @@ def _empty_geopose() -> IdlGeoPose:
 
 
 def _cov_type():
-    from spatialdds_idl.spatial.core import CovMatrix
+    from spatialdds_idl18.spatial.core import CovMatrix
     return CovMatrix
 
 

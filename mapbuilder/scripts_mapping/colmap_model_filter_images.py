@@ -120,7 +120,7 @@ def colmap_model_filter_images(input_colmap_model_dir=None, input_images_dir=Non
             reject = False
             for prev_id, prev_pose in trajectory.items():
                 if reject_due_position_distance_small(cur_pose["tvec"], prev_pose["tvec"], min_pos_distance):
-                    if reject_due_position_distance_small(cur_pose["qvec"], prev_pose["qvec"], min_ori_distance):
+                    if reject_due_orientation_distance_small(cur_pose["qvec"], prev_pose["qvec"], min_ori_distance):
                         reject = True
                     # note: we still keep those that are close in position but have large orientation distance
 

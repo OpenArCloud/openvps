@@ -1,7 +1,11 @@
 # Map localizer
-Visual localization server using the Open AR Cloud GeoPoseProtocol. The server relies on [HLOC](https://github.com/cvg/Hierarchical-Localization) for localization. It loads a map created by the MapBuilder (HLOC) and localizes query images in it. The queries can be sent for example from a smartphone.
+Visual localization server using the Open AR Cloud GeoPoseProtocol. The server relies on [HLOC](https://github.com/cvg/Hierarchical-Localization) for localization. It loads a map created by the MapBuilder (HLOC) and localizes query images in it.
 
 This component is part of OpenVPS: Open Visual Positioning Service.
+
+**AR clients** should call **[MapSelector](../mapselector/README.md)** (`MAPSELECTOR_URL`, default public port **8046**) for `POST /localize/geopose`, not MapLocalizer directly. MapSelector picks a map from GNSS via MapRegistry and proxies to MapLocalizer with `X-OpenVPS-Map-Id`.
+
+**MapBuilder** still talks to MapLocalizer on the **in-cluster** URL (`http://maplocalizer:8000` in compose, or host port **8043** when debugging) for `GET /current_map_id` and `GET /load_map/{mapId}`.
 
 Author: Gabor Soros (@soeroesg)
 

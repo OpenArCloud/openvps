@@ -2,7 +2,7 @@ FusionAuth is an authentication backend that can run locally and does not requir
 
 In the description below, we will assume that the domain name of your OpenVPS is `https://openvps.org` and the following _external_ ports are used:
 - 8045 for FusionAuth
-- 8046 for MapLocalizer
+- 8046 for MapSelector (GeoPoseProtocol endpoint)
 - 8047 for MapBuilder
 - 8048 for MapAligner
 

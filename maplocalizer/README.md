@@ -51,8 +51,11 @@ If you want to run the server without Docker, create `server/.env` file with the
 appName="OpenVPS-MapLocalizer"
 uploadsDir=/path/to/your/maps/folder
 debug=False
+maxLoadedMaps=1
 ```
 The uploadsDir should point to the folder where your mapbuilder puts the maps.
+
+**Multi-map GPU policy:** `maxLoadedMaps` caps how many maps stay resident (default **1**). Before loading a map, MapLocalizer derives **`localization_model_signature`** from `config.yaml` (`feature_conf`, `matcher_conf`, `retrieval_conf`, `pairs_strategy`). Maps with a **different** signature are unloaded first so only one HLOC neural stack is on the GPU at a time. With `maxLoadedMaps>1`, only maps sharing the same signature may remain loaded together. The signature is also written to `coverage.json` at coverage compute time for the registry index.
 
 
 # Running the server

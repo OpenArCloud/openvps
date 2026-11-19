@@ -37,6 +37,7 @@ from colmap_model_coverage_points import (
     filter_points_from_reconstruction,
 )
 from geopose_utils import enu_to_geodetic
+from map_model_gate import localization_model_signature_from_config_path
 
 COVERAGE_SCHEMA_VERSION = 1
 MAX_ABS_LAT_SUPPORTED = 85.0
@@ -201,6 +202,13 @@ def compute_coverage(
     }
     if geodetic_block is not None:
         out["geodetic_coverage"] = geodetic_block
+
+    config_path = transform_path.parent / "config.yaml"
+    loc_sig, _, loc_desc = localization_model_signature_from_config_path(config_path)
+    if loc_sig is not None:
+        out["localization_model_signature"] = loc_sig
+    if loc_desc is not None:
+        out["localization_model"] = loc_desc
     return out
 
 

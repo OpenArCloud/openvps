@@ -112,6 +112,19 @@ export async function runMapCoverageCompute(
     await executor.executeCommand(cmd, config.shell);
 }
 
+export function notifyMapRegistry(datasetId: string, mapId: string): void {
+    const base = process.env.MAPREGISTRY_URL;
+    if (!base) {
+        return;
+    }
+    const url = `${base.replace(/\/$/, "")}/internal/reload`;
+    fetch(url, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({dataset_id: datasetId, map_id: mapId}),
+    }).catch((e) => console.error("[mapregistry] coverage notify failed", e));
+}
+
 export async function computeMapCoverageAndNotify(
     datasetId: string,
     mapId: string,
@@ -120,4 +133,5 @@ export async function computeMapCoverageAndNotify(
     settings: HlocMapCoverageSettings,
 ): Promise<void> {
     await runMapCoverageCompute(mapWorkDir, mapId, config, settings);
+    notifyMapRegistry(datasetId, mapId);
 }

@@ -12,6 +12,7 @@ import dynamic from "next/dynamic";
 import { SessionProvider, signOut } from "next-auth/react";
 import { useSearchParams } from "next/navigation.js";
 import { Allotment } from "allotment";
+import { coverageArtifactToGeoJson } from "../lib/coverageGeojson.js";
 
 export const MAX_PROGRESS = 1.2;
 
@@ -69,7 +70,44 @@ export default function Matcher() {
 
   const [modified, setModified] = useState(false);
 
+  /** @type {ReturnType<typeof useState<object | null>>} */
+  const [coverageGeoJson, setCoverageGeoJson] = useState(null);
+  const [showCoverageFootprint, setShowCoverageFootprint] = useState(false);
+  const [showCoverageAabb, setShowCoverageAabb] = useState(false);
+
   const watchedStates = useRef([translation, rotation, scale, latitude, longitude]);
+
+  const hasCoverageFootprint =
+    coverageGeoJson?.features?.some((f) => f.properties?.kind === "footprint") ?? false;
+  const hasCoverageAabb =
+    coverageGeoJson?.features?.some((f) => f.properties?.kind === "aabb") ?? false;
+
+  useEffect(() => {
+    setShowCoverageFootprint(false);
+    setShowCoverageAabb(false);
+  }, [coverageGeoJson]);
+
+  async function fetchCoverageForMap(map) {
+    if (!map) {
+      setCoverageGeoJson(null);
+      return;
+    }
+    const params = new URLSearchParams({ type: map.type, dataSetId: map.dataSetId });
+    try {
+      const response = await fetch(`/api/maps/${map.id}/coverage?${params}`, {
+        credentials: "include",
+      });
+      if (!response.ok) {
+        setCoverageGeoJson(null);
+        return;
+      }
+      const artifact = await response.json();
+      setCoverageGeoJson(coverageArtifactToGeoJson(artifact));
+    } catch (error) {
+      console.error("Failed to load coverage.json", error);
+      setCoverageGeoJson(null);
+    }
+  }
 
   useEffect(() => {
     const currentState = [translation, rotation, scale, latitude, longitude];
@@ -190,6 +228,7 @@ export default function Matcher() {
     if (saveQuery.ok) {
       alert("Saved");
       setModified(false);
+      await fetchCoverageForMap(selectedMap);
     } else {
       const error = await saveQuery.text();
       console.error("Could not upload transformation matrix:", error);
@@ -222,6 +261,7 @@ export default function Matcher() {
       } catch (error) {
         console.error(error);
       }
+      await fetchCoverageForMap(selectedMap);
     })();
   }, [selectedMap]);
 
@@ -256,6 +296,14 @@ export default function Matcher() {
                   min={1}
                   max={6}
                   step={1}
+                />
+                <CoverageLayerControls
+                  hasFootprint={hasCoverageFootprint}
+                  hasAabb={hasCoverageAabb}
+                  showFootprint={showCoverageFootprint}
+                  setShowFootprint={setShowCoverageFootprint}
+                  showAabb={showCoverageAabb}
+                  setShowAabb={setShowCoverageAabb}
                 />
                 <LoadConfig
                   setTranslation={setTranslation}
@@ -333,12 +381,58 @@ export default function Matcher() {
                 pointSize={pointSize}
                 setProgress={setProgress}
                 debugGeoPose={debugGeoPose}
+                coverageGeoJson={coverageGeoJson}
+                showCoverageFootprint={showCoverageFootprint}
+                showCoverageAabb={showCoverageAabb}
               />
             </SessionProvider>
           </div>
         </Allotment.Pane>
       </Allotment>
     </div>
+  );
+}
+
+function CoverageLayerControls({
+  hasFootprint,
+  hasAabb,
+  showFootprint,
+  setShowFootprint,
+  showAabb,
+  setShowAabb,
+}) {
+  return (
+    <fieldset className="border border-base-300 dark:border-neutral rounded-lg p-2 flex flex-col gap-1">
+      <legend className="px-1 text-sm font-medium">Coverage</legend>
+      <label
+        className={
+          "label justify-start gap-3 py-1 " + (hasFootprint ? "cursor-pointer" : "cursor-not-allowed opacity-50")
+        }
+      >
+        <input
+          type="checkbox"
+          className="checkbox checkbox-sm checkbox-primary"
+          checked={showFootprint}
+          disabled={!hasFootprint}
+          onChange={(e) => setShowFootprint(e.target.checked)}
+        />
+        <span className="text-sm">Geo hull</span>
+      </label>
+      <label
+        className={
+          "label justify-start gap-3 py-1 " + (hasAabb ? "cursor-pointer" : "cursor-not-allowed opacity-50")
+        }
+      >
+        <input
+          type="checkbox"
+          className="checkbox checkbox-sm checkbox-secondary"
+          checked={showAabb}
+          disabled={!hasAabb}
+          onChange={(e) => setShowAabb(e.target.checked)}
+        />
+        <span className="text-sm">Geo AABB</span>
+      </label>
+    </fieldset>
   );
 }
 

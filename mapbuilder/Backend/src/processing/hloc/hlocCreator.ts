@@ -19,6 +19,8 @@ import {
     HlocFormatStage,
     HlocImageFilterStage,
     HlocMapBuildStage,
+    HlocMapCoverageSettings,
+    HlocMapCoverageStage,
     HlocMapPlyExportStage,
     HlocMapScaleEstimationSettings,
     HlocMapScaleEstimationStage,
@@ -55,6 +57,9 @@ export class HlocCreator extends ScriptExecutor {
                 break;
             case HlocMapPlyExportStage.stageName:
                 this.state.tasks.hlocMapPlyExport = task;
+                break;
+            case HlocMapCoverageStage.stageName:
+                this.state.tasks.hlocMapCoverage = task;
                 break;
             case HlocMapZipExportStage.stageName:
                 this.state.tasks.hlocMapZipExport = task;
@@ -162,6 +167,23 @@ export class HlocCreator extends ScriptExecutor {
             const mapPlyExportStatus = this.state.tasks.hlocMapPlyExport;
             const mapPlyExportStage = new HlocMapPlyExportStage(workDir, this.config, this.subtaskPublishStatus, mapPlyExportStatus);
             const result = await mapPlyExportStage.execute();
+            if (result === TaskStatus.failed) {
+                return this.state;
+            }
+        }
+
+        const mapCoverageStatus = this.state.tasks.hlocMapCoverage as TaskDescription | undefined;
+        if (!mapCoverageStatus || mapCoverageStatus.status != TaskStatus.completed) {
+            const coverageStage = new HlocMapCoverageStage(
+                workDir,
+                this.uploadLocation.getId(),
+                this.state.mapId,
+                this.getRunStageSettings(HlocMapCoverageStage.settingsSchema) as HlocMapCoverageSettings,
+                this.config,
+                this.subtaskPublishStatus,
+                mapCoverageStatus,
+            );
+            const result = await coverageStage.execute();
             if (result === TaskStatus.failed) {
                 return this.state;
             }

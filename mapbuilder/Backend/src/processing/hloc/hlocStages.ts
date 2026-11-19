@@ -8,6 +8,7 @@ import {IdempotentStage} from "../stage";
 import {UploadLocation} from "../../uploadLocation";
 import {EnvironmentalConfig} from "../../index";
 import {StageUpdatePublisher, TaskDescription} from "../../dataSet";
+import {computeMapCoverageAndNotify} from "../../mapCoverage";
 import {getHlocMapWorkDirectory} from "./hlocMapManager";
 import {PipelineStageSettings, StageSettingsSchema, StageSettingsValues} from "../stageSettings";
 
@@ -32,6 +33,14 @@ export interface HlocMapScaleEstimationSettings extends StageSettingsValues {
     mode: string;
     minSharedImages: number;
     minPairDistanceM: number;
+}
+
+export interface HlocMapCoverageSettings extends StageSettingsValues {
+    preset: string;
+    minTrackLen: number;
+    maxReprojErrorPx: number;
+    maxHorizRadiusM: number;
+    horizPercentile: number;
 }
 
 export class HlocFormatStage extends IdempotentStage {
@@ -292,6 +301,92 @@ export class HlocMapPlyExportStage extends IdempotentStage {
     }
 }
 
+export class HlocMapCoverageStage extends IdempotentStage {
+    constructor(
+        private hlocMapWorkDirectory: string,
+        private datasetId: string,
+        private mapId: string,
+        private settings: HlocMapCoverageSettings,
+        private config: EnvironmentalConfig,
+        publishTaskStatus: StageUpdatePublisher,
+        taskState: TaskDescription | undefined,
+    ) {
+        super(HlocMapCoverageStage.stageName, config.scriptsDir, publishTaskStatus, taskState);
+    }
+
+    public static readonly stageName = "hlocMapCoverage";
+
+    public static readonly settingsSchema: StageSettingsSchema = {
+        stageName: HlocMapCoverageStage.stageName,
+        title: "Coverage",
+        scope: "run",
+        settings: [
+            {
+                kind: "enum",
+                key: "preset",
+                label: "Footprint preset",
+                description: "Sets the default horizontal radius cap (outdoor 50 m, indoor 15 m); advanced fields can override.",
+                default: "outdoor",
+                options: [
+                    {label: "Outdoor", value: "outdoor"},
+                    {label: "Indoor", value: "indoor"},
+                ],
+            },
+            {
+                kind: "integer",
+                key: "minTrackLen",
+                label: "Min track length",
+                description: "Minimum COLMAP point track length to include in the footprint.",
+                default: 3,
+                min: 2,
+                step: 1,
+                advanced: true,
+            },
+            {
+                kind: "number",
+                key: "maxReprojErrorPx",
+                label: "Max reprojection error (px)",
+                default: 4.0,
+                min: 0.1,
+                step: 0.1,
+                advanced: true,
+            },
+            {
+                kind: "number",
+                key: "maxHorizRadiusM",
+                label: "Max horizontal radius (m)",
+                description:
+                    "Cap on horizontal distance from points to nearest camera. Leave at the preset default (outdoor 50 m, indoor 15 m) to use the footprint preset.",
+                default: 50.0,
+                min: 1,
+                step: 1,
+                advanced: true,
+            },
+            {
+                kind: "number",
+                key: "horizPercentile",
+                label: "Horizontal distance percentile",
+                description: "Percentile of point-to-camera distances used before applying the radius cap.",
+                default: 90.0,
+                min: 1,
+                max: 100,
+                step: 1,
+                advanced: true,
+            },
+        ],
+    };
+
+    async scriptProcessing() {
+        await computeMapCoverageAndNotify(
+            this.datasetId,
+            this.mapId,
+            this.hlocMapWorkDirectory,
+            this.config,
+            this.settings,
+        );
+    }
+}
+
 export class HlocMapZipExportStage extends IdempotentStage {
     constructor(
         private hlocMapWorkDirectory: string,
@@ -326,6 +421,7 @@ export const HLOC_PIPELINE_STAGES: HlocStageClass[] = [
     HlocMapBuildStage,
     HlocMapScaleEstimationStage,
     HlocMapPlyExportStage,
+    HlocMapCoverageStage,
     HlocMapZipExportStage,
 ];
 

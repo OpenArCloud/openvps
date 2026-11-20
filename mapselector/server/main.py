@@ -75,9 +75,41 @@ app.add_middleware(
 )
 
 
+@app.get("/")
+def read_root():
+    return {
+        "STATUS": "OpenVPS MapSelector is running. POST /localize/geopose for GeoPose (GPP v2.0)",
+        "service": "mapselector",
+    }
+
+
+@app.get("/localize/geopose")
+async def localize_ping():
+    """Liveness check (GET); localization uses POST with a GeoPoseRequest body."""
+    return {"STATUS": "GeoPose server is running", "service": "mapselector"}
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "mapselector"}
+
+
+@app.get("/ready")
+def ready():
+    return {"ready": True, "service": "mapselector"}
+
+
+@app.get("/current_map_id")
+async def current_map_id_bridge():
+    """Proxy MapLocalizer loaded-map id (legacy clients used this on the public GeoPose port)."""
+    cfg = get_settings()
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.get(f"{cfg.localizer_url.rstrip('/')}/current_map_id")
+    return Response(
+        content=r.content,
+        status_code=r.status_code,
+        media_type=r.headers.get("content-type") or "application/json",
+    )
 
 
 async def _fetch_registry_candidates(q: GnssQuery) -> Dict[str, Any]:

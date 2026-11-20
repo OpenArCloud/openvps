@@ -1,6 +1,6 @@
 # Map Selector
 
-OpenVPS public GeoPoseProtocol server. Clients call **`POST /localize/geopose`** here instead of MapLocalizer directly.
+OpenVPS public GeoPoseProtocol server. Clients call **`POST /localize/geopose`** here instead of MapLocalizer directly. **`GET /current_map_id`** is proxied to MapLocalizer for legacy tools that queried the old public localizer port.
 
 ## Flow
 

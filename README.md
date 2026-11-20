@@ -14,7 +14,7 @@ The system consists of MapBuilder, MapAligner, MapLocalizer, optional MapRegistr
 
 First, images are captured by a smartphone app (currently the format of [StrayScanner](https://docs.strayrobots.io/) is supported), and uploaded to the **MapBuilder** for processing. The MapBuilder runs the HLOC mapping pipeline, and the map points are also exported as a PLY point cloud. The **MapAligner** loads the PLY point cloud and an OpenStreetMap map tile, and the user manually aligns the point cloud with the building footprints on the map. The resulting 3D transform can be saved to the MapBuilder. Finally, a map with its transform can be loaded into the **MapLocalizer**, which can then localize query images sent by mobile devices. The localization happens in the HLOC map first, but using the geo-alignment transform, the result is converted to OGC GeoPose format. When several maps are deployed, **MapSelector** exposes the same GeoPose endpoint shape but picks the best map from coarse GNSS using **MapRegistry**, then proxies the request to MapLocalizer with the chosen map id.
 
-![System overview](./docs/overview.jpg)
+![System overview](./docs/overview_with_mapselector.jpg)
 
 
 ### Hierarchical-Localization
@@ -108,6 +108,7 @@ AUTH_SECRET=
 
 # -- MapBuilder (frontend) configuration
 # This is the port that you can access on localhost. The 'frontend' container listens on these two ports.
+MAPBUILDER_URL=https://your.domain.name:your_external_mapbuilder_frontend_port
 MAPBUILDER_PORT=80
 MAPBUILDER_PORT_HTTPS=443
 

@@ -100,6 +100,22 @@ def extract_prior_geopose_query(body: Dict[str, Any]) -> Optional[GnssQuery]:
     return GnssQuery(lat=lat, lon=lon, radius_m=radius, alt=alt, alt_radius_m=alt_radius_m)
 
 
+def _geolocation_readings_list(body: Dict[str, Any]) -> List[Any]:
+    """GNSS readings from sensorReadings (GPP + common geoLocationReadings spelling)."""
+    keys = ("geolocationReadings", "geoLocationReadings")
+    sr = body.get("sensorReadings")
+    if isinstance(sr, dict):
+        for key in keys:
+            readings = sr.get(key)
+            if isinstance(readings, list) and readings:
+                return readings
+    for key in keys:
+        readings = body.get(key)
+        if isinstance(readings, list) and readings:
+            return readings
+    return []
+
+
 def extract_location_query(body: Dict[str, Any]) -> Optional[GnssQuery]:
     """priorPoses first, then geolocationReadings."""
     q = extract_prior_geopose_query(body)
@@ -109,7 +125,7 @@ def extract_location_query(body: Dict[str, Any]) -> Optional[GnssQuery]:
 
 
 def extract_gnss_query(body: Dict[str, Any]) -> Optional[GnssQuery]:
-    readings = (body.get("sensorReadings") or {}).get("geolocationReadings") or []
+    readings = _geolocation_readings_list(body)
     if not readings:
         return None
     g = readings[0]

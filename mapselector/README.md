@@ -4,7 +4,7 @@ OpenVPS public GeoPoseProtocol server. Clients call **`POST /localize/geopose`**
 
 ## Flow
 
-1. Derive a WGS84 query point: **`priorPoses[0]`** (`geopose.position` or `geoposes[0].position`) takes priority, else **`sensorReadings.geolocationReadings[0]`**. FramedPose-only priors (`poses[]` without WGS84) are ignored for map selection.
+1. Derive a WGS84 query point: **`priorPoses[0]`** (`geopose.position` or `geoposes[0].position`) takes priority, else **`sensorReadings.geolocationReadings[0]`** (also accepts **`geoLocationReadings`**, as some clients serialize). FramedPose-only priors (`poses[]` without WGS84) are ignored for map selection.
 2. Call MapRegistry **`GET /maps/query`** (`lat`, `lon`, `radius_m`; default horizontal radius **75 m**, raised by prior **`accuracy.position`** or GNSS **`accuracy`** when > 1 m). Optional **`alt`** / **`alt_radius_m`** when **`kEnableVerticalSearch`** is `True` (default **off**; **15 m** vertical window).
 3. Pick one or more ranked `map_id` candidates.
 4. Proxy the request to MapLocalizer with header **`X-OpenVPS-Map-Id`**.

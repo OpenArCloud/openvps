@@ -1,6 +1,6 @@
 # Map Selector
 
-OpenVPS public GeoPoseProtocol server. Clients call **`POST /localize/geopose`** here instead of MapLocalizer directly. **`GET /current_map_id`** is proxied to MapLocalizer for legacy tools that queried the old public localizer port.
+OpenVPS public GeoPoseProtocol server. Clients call **`POST /localize/geopose`** here instead of MapLocalizer directly. Legacy MapLocalizer probes on the old public port are proxied in-cluster: **`GET /current_map_id`**, **`GET /health`**, **`GET /gpu_info`**. MapSelector-only liveness: **`GET /ready`**, **`GET /`**.
 
 ## Flow
 
@@ -9,7 +9,7 @@ OpenVPS public GeoPoseProtocol server. Clients call **`POST /localize/geopose`**
 3. Pick one or more ranked `map_id` candidates.
 4. Proxy the request to MapLocalizer with header **`X-OpenVPS-Map-Id`**.
 
-With neither prior nor GNSS hint, MapSelector forwards **without** `X-OpenVPS-Map-Id` (currently loaded map). With a hint but no registry hit, HTTP 404.
+With neither prior nor GNSS hint, MapSelector forwards **without** `X-OpenVPS-Map-Id` (currently loaded map). If no map is loaded, it returns **404** `Could not localize request …` **without** calling MapLocalizer. With a hint but no registry hit, HTTP 404.
 
 ## Multi-map try (feature under development)
 
@@ -22,7 +22,7 @@ Bounded multi-map retries are controlled by module constants in `server/main.py`
 
 **Public (AR clients):** configure **`MAPSELECTOR_URL`** in `docker.env` (e.g. `https://your.domain:8046`). Host bind: **`MAPSELECTOR_PORT`** (default **8046**). Host nginx must proxy **8046 → MapSelector**, not MapLocalizer (see root [`README.md`](../README.md) — **NGINX and GeoPose**).
 
-**In-cluster only:** Compose sets **`MAPLOCALIZER_URL=http://maplocalizer:8000`** and **`MAPREGISTRY_URL=http://mapregistry:8101`** for MapSelector. Do not point these at public HTTPS URLs from `docker.env`.
+**In-cluster only:** Compose sets **`MAPLOCALIZER_URL=http://maplocalizer:8000`** and **`MAPREGISTRY_URL=http://mapregistry:8101`** for MapSelector. Do not point these at public HTTPS URLs from `docker.env`. MapSelector uses **`httpx` with `trust_env=False`** for those calls so a host **`HTTP_PROXY`** (e.g. `MY_HTTP_PROXY` for image builds) is not used for `maplocalizer` / `mapregistry` DNS names.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
@@ -32,3 +32,14 @@ Bounded multi-map retries are controlled by module constants in `server/main.py`
 | `MAPLOCALIZER_URL` | `http://maplocalizer:8000` | MapLocalizer base URL (in-cluster) |
 
 Registry query tuning in `server/selection.py`: **`kDefaultHorizontalSearchRadius`** (75), **`kEnableVerticalSearch`** (default `False`), **`kDefaultVerticalSearchRadius`** (15).
+
+## Troubleshooting `POST /localize/geopose`
+
+Responses use GPP-style JSON: `{"ERROR": "..."}` when MapSelector fails before or instead of a GeoPose result. Check **`docker compose logs mapselector`** for lines like `map resolution failed` or `map resolve via registry` / `via loaded map`.
+
+| Symptom | Typical cause |
+|---------|----------------|
+| **404** `Could not localize request …` + no MapLocalizer **POST** log | No location hint and **no map loaded** — same client-facing failure as MapLocalizer; load a map in MapBuilder first. |
+| **502** `MapRegistry unreachable` / `MapLocalizer unreachable` | In-cluster network or service down; confirm `mapregistry` / `maplocalizer` containers are up. |
+| **404** `No map coverage intersects coarse location` | Real GNSS/prior but no indexed coverage at that point — (re)compute coverage in MapBuilder or load the map manually. |
+| Client sends **`geolocationReadings`** at **(0,0)** | Treated as no hint (placeholder); falls back to the **loaded map** in MapLocalizer — use MapBuilder’s load-map pin first. |

@@ -26,24 +26,49 @@ class GnssQuery:
     alt_radius_m: Optional[float] = None
 
 
+def _coerce_wgs84(lat_raw: Any, lon_raw: Any) -> Optional[Tuple[float, float]]:
+    """Parse lat/lon; None when missing or non-numeric."""
+    if lat_raw is None or lon_raw is None:
+        return None
+    try:
+        lat = float(lat_raw)
+        lon = float(lon_raw)
+    except (TypeError, ValueError):
+        return None
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+        return None
+    return lat, lon
+
+
+def _is_placeholder_gnss(lat: float, lon: float, accuracy_m: float) -> bool:
+    """Ignore (0,0) with no meaningful accuracy — common before GPS fix in clients."""
+    return lat == 0.0 and lon == 0.0 and accuracy_m <= 1.0
+
+
 def _wgs84_from_prior_pose(prior: Dict[str, Any]) -> Optional[Tuple[float, float, Optional[float]]]:
     """lat, lon, optional h from GeoPoseResponse-shaped prior (geopose or geoposes[0])."""
     geopose = prior.get("geopose")
     if isinstance(geopose, dict):
         pos = geopose.get("position")
-        if isinstance(pos, dict) and "lat" in pos and "lon" in pos:
-            h_raw = pos.get("h")
-            h = float(h_raw) if h_raw is not None else None
-            return float(pos["lat"]), float(pos["lon"]), h
+        if isinstance(pos, dict):
+            coords = _coerce_wgs84(pos.get("lat"), pos.get("lon"))
+            if coords is not None:
+                lat, lon = coords
+                h_raw = pos.get("h")
+                h = float(h_raw) if h_raw is not None else None
+                return lat, lon, h
     geoposes = prior.get("geoposes")
     if isinstance(geoposes, list) and geoposes:
         first = geoposes[0]
         if isinstance(first, dict):
             pos = first.get("position")
-            if isinstance(pos, dict) and "lat" in pos and "lon" in pos:
-                h_raw = pos.get("h")
-                h = float(h_raw) if h_raw is not None else None
-                return float(pos["lat"]), float(pos["lon"]), h
+            if isinstance(pos, dict):
+                coords = _coerce_wgs84(pos.get("lat"), pos.get("lon"))
+                if coords is not None:
+                    lat, lon = coords
+                    h_raw = pos.get("h")
+                    h = float(h_raw) if h_raw is not None else None
+                    return lat, lon, h
     return None
 
 
@@ -61,7 +86,10 @@ def extract_prior_geopose_query(body: Dict[str, Any]) -> Optional[GnssQuery]:
     radius = kDefaultHorizontalSearchRadius
     accuracy = prior.get("accuracy")
     if isinstance(accuracy, dict):
-        acc = float(accuracy.get("position", 0) or 0)
+        try:
+            acc = float(accuracy.get("position", 0) or 0)
+        except (TypeError, ValueError):
+            acc = 0.0
         if acc > 1.0:
             radius = max(radius, acc)
     alt: Optional[float] = None
@@ -85,17 +113,30 @@ def extract_gnss_query(body: Dict[str, Any]) -> Optional[GnssQuery]:
     if not readings:
         return None
     g = readings[0]
-    lat = float(g.get("latitude", 0.0))
-    lon = float(g.get("longitude", 0.0))
+    if not isinstance(g, dict):
+        return None
+    coords = _coerce_wgs84(g.get("latitude"), g.get("longitude"))
+    if coords is None:
+        return None
+    lat, lon = coords
+    acc_raw = g.get("accuracy", 0.0)
+    try:
+        acc = float(acc_raw) if acc_raw is not None else 0.0
+    except (TypeError, ValueError):
+        acc = 0.0
+    if _is_placeholder_gnss(lat, lon, acc):
+        return None
     radius = kDefaultHorizontalSearchRadius
-    acc = float(g.get("accuracy", 0.0) or 0.0)
     if acc > 1.0:
         radius = max(radius, acc)
     alt: Optional[float] = None
     alt_radius_m: Optional[float] = None
-    if kEnableVerticalSearch and "altitude" in g and g.get("altitude") is not None:
-        alt = float(g["altitude"])
-        alt_radius_m = kDefaultVerticalSearchRadius
+    if kEnableVerticalSearch and g.get("altitude") is not None:
+        try:
+            alt = float(g["altitude"])
+            alt_radius_m = kDefaultVerticalSearchRadius
+        except (TypeError, ValueError):
+            pass
     return GnssQuery(lat=lat, lon=lon, radius_m=radius, alt=alt, alt_radius_m=alt_radius_m)
 
 

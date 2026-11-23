@@ -51,6 +51,10 @@ class Settings(BaseSettings):
         default="http://maplocalizer:8000",
         validation_alias=AliasChoices("MAPLOCALIZER_URL"),
     )
+    localize_timeout_s: float = Field(
+        default=600.0,
+        validation_alias=AliasChoices("MAPSELECTOR_LOCALIZE_TIMEOUT_S"),
+    )
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -250,7 +254,8 @@ async def localize_geopose(request: Request):
     last_media = "application/json"
     tried: List[str] = []
 
-    async with _cluster_http_client(timeout=120.0) as client:
+    timeout = get_settings().localize_timeout_s
+    async with _cluster_http_client(timeout=timeout) as client:
         try:
             resolution = await _resolve_map_resolution(client, body)
         except HTTPException as exc:

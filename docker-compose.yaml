@@ -103,6 +103,7 @@ services:
     environment:
       - MAPREGISTRY_URL=http://mapregistry:8101
       - MAPLOCALIZER_URL=http://maplocalizer:8000
+      - MAPSELECTOR_LOCALIZE_TIMEOUT_S=${MAPSELECTOR_LOCALIZE_TIMEOUT_S:-600}
     ports:
       - ${MAPSELECTOR_PORT:-8046}:8102
     deploy:

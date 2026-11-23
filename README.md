@@ -152,6 +152,8 @@ location / {
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
     client_max_body_size 50m;            # GeoPose image payloads
+    proxy_read_timeout 600s;             # cold map load + first localize can be slow
+    proxy_send_timeout 600s;
 }
 ```
 

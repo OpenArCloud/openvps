@@ -30,6 +30,7 @@ Bounded multi-map retries are controlled by module constants in `server/main.py`
 | `MAPSELECTOR_PORT` | `8046` | Host port published to MapSelector (container **8102**) |
 | `MAPREGISTRY_URL` | `http://mapregistry:8101` | Registry base URL (in-cluster) |
 | `MAPLOCALIZER_URL` | `http://maplocalizer:8000` | MapLocalizer base URL (in-cluster) |
+| `MAPSELECTOR_LOCALIZE_TIMEOUT_S` | `600` | Max wait for MapLocalizer (cold map load + localize) |
 
 Registry query tuning in `server/selection.py`: **`kDefaultHorizontalSearchRadius`** (75), **`kEnableVerticalSearch`** (default `False`), **`kDefaultVerticalSearchRadius`** (15).
 

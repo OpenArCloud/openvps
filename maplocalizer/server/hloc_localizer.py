@@ -317,11 +317,12 @@ class HlocLocalizer(BaseLocalizer):
         map_path = Path(config['reconstruction_path']) # / 'models' / '0'
         if not map_path.exists() or not map_path.is_dir():
             raise FileNotFoundError(f"map path {str(map_path)} does not exist")
-        print(f"Map path: {str(map_path)}")
+        print(f"Map path: {str(map_path)}", flush=True)
         self.reconstruction = pycolmap.Reconstruction()
         self.reconstruction.read(str(map_path))
 
         self.map_image_names = [i.name for i in self.reconstruction.images.values()]
+        print(f"Colmap reconstruction loaded ({len(self.map_image_names)} images).", flush=True)
         if len(self.map_image_names) == 0:
             raise ValueError("Could not find any map images.")
 
@@ -331,39 +332,65 @@ class HlocLocalizer(BaseLocalizer):
         local_features_path = Path(config['reconstruction_path']) / 'features.h5'
         self.load_map_local_features(local_features_path)
 
-        # Load map global features
-        global_features_path = Path(config['reconstruction_path']) / 'global_features.h5'
-        if global_features_path.exists():
+        global_features_path = Path(config["reconstruction_path"]) / "global_features.h5"
+        if self.retrieval_conf is not None:
+            if not global_features_path.is_file():
+                strategy = self.config.get("pairs_strategy", "unknown")
+                raise FileNotFoundError(
+                    f"Map uses retrieval_conf but {global_features_path} is missing "
+                    f"(pairs_strategy={strategy}). Maps built with from_poses / from_exhaustive "
+                    "do not create this file unless you re-run MapBuilder feature extraction "
+                    "or rebuild with the updated pipeline that adds global_features.h5."
+                )
+            self.load_map_global_features(global_features_path)
+        elif global_features_path.is_file():
             self.load_map_global_features(global_features_path)
 
 
     def close(self):
-        if hasattr(self, "map_local_descriptors"):
-            try:
-                self.map_local_descriptors.close()
-            except Exception as ex:
-                print(f"Could not close local descriptor file for map {self.map_id}: {ex}")
+        """Release GPU/RAM map state; must not raise (unload/evict always calls this)."""
+        try:
+            if hasattr(self, "map_local_descriptors"):
+                try:
+                    self.map_local_descriptors.close()
+                except Exception as ex:
+                    print(
+                        f"Could not close local descriptor file for map {getattr(self, 'map_id', '')}: {ex}",
+                        flush=True,
+                    )
 
-        for name in (
-            "feature_extractor",
-            "global_feature_extractor",
-            "matcher",
-            "reconstruction",
-            "map_global_descriptors",
-            "map_local_descriptors",
-            "map_image_names",
-            "db_name_to_id",
-            "feature_conf",
-            "matcher_conf",
-            "retrieval_conf",
-            "config",
-        ):
-            if hasattr(self, name):
-                delattr(self, name)
+            for name in (
+                "feature_extractor",
+                "global_feature_extractor",
+                "matcher",
+                "reconstruction",
+                "map_global_descriptors",
+                "map_local_descriptors",
+                "map_image_names",
+                "db_name_to_id",
+                "_retrieval_image_names",
+                "feature_conf",
+                "matcher_conf",
+                "retrieval_conf",
+                "config",
+            ):
+                if hasattr(self, name):
+                    try:
+                        delattr(self, name)
+                    except Exception as ex:
+                        print(
+                            f"close: could not drop {name} for map {getattr(self, 'map_id', '')}: {ex}",
+                            flush=True,
+                        )
 
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception as ex:
+            print(
+                f"close: non-fatal cleanup error for map {getattr(self, 'map_id', '')}: {ex}",
+                flush=True,
+            )
 
 
     def load_map_transform(self, map_transform_path: Path, map_id: str):
@@ -405,15 +432,75 @@ class HlocLocalizer(BaseLocalizer):
         # We only open the file here and we will load the necessary features later on the fly.
         self.map_local_descriptors = h5py.File(local_features_path, 'r')
 
+    @staticmethod
+    def _h5_group_for_image(fd, image_name: str) -> Optional[str]:
+        """Match a COLMAP image name to an HDF5 group (paths vs basenames)."""
+        candidates: List[str] = []
+        for c in (image_name, image_name.replace("\\", "/")):
+            if c and c not in candidates:
+                candidates.append(c)
+        if "/" in image_name:
+            base = image_name.rsplit("/", 1)[-1]
+            if base not in candidates:
+                candidates.append(base)
+        for c in candidates:
+            if c in fd:
+                return c
+        return None
+
+    def _global_features_path(self) -> Path:
+        return Path(self.config["reconstruction_path"]) / "global_features.h5"
+
+    def ensure_map_global_descriptors(self) -> bool:
+        """When retrieval_conf is set, load global_features.h5 into RAM if not already loaded."""
+        if getattr(self, "map_global_descriptors", None) is not None:
+            return True
+        if self.retrieval_conf is None:
+            return False
+        path = self._global_features_path()
+        if not path.is_file():
+            print(f"WARNING: retrieval enabled but {path} is missing", flush=True)
+            return False
+        print(f"Loading map global features (lazy) from: {path}", flush=True)
+        self.load_map_global_features(path)
+        return True
 
     # code adapted from https://github.com/cvg/Hierarchical-Localization/blob/master/hloc/pairs_from_retrieval.py
     def load_map_global_features(self, global_features_path:Path):
         print(f"Loading map global features from: {str(global_features_path)}")
         # NOTE(soeroesg): we load all global features into RAM because they are used often
-        key="global_descriptor"
-        with h5py.File(global_features_path, 'r') as fd:
-            desc = [fd[n][key].__array__() for n in self.map_image_names]
+        key = "global_descriptor"
+        missing = []
+        desc = []
+        matched_names: List[str] = []
+        total = len(self.map_image_names)
+        with h5py.File(global_features_path, "r") as fd:
+            for idx, n in enumerate(self.map_image_names):
+                h5_key = self._h5_group_for_image(fd, n)
+                if h5_key is None:
+                    missing.append(n)
+                    continue
+                desc.append(fd[h5_key][key].__array__())
+                matched_names.append(n)
+                if total > 500 and idx > 0 and idx % 500 == 0:
+                    print(f"  global features: {idx}/{total}", flush=True)
+        if missing:
+            print(
+                f"WARNING: {len(missing)} map image(s) missing from global_features.h5 "
+                f"(first: {missing[0]!r})"
+            )
+        if not desc:
+            raise ValueError(
+                f"No global descriptors loaded from {global_features_path}; "
+                "rebuild global features for this map or disable retrieval_conf"
+            )
         self.map_global_descriptors = torch.from_numpy(np.stack(desc, 0)).float()
+        self._retrieval_image_names = matched_names
+        print(
+            f"Loaded {len(desc)} global descriptors from {global_features_path} "
+            f"({len(missing)} COLMAP image(s) without a match in h5)",
+            flush=True,
+        )
 
 
     # code adapted from https://github.com/cvg/Hierarchical-Localization/blob/master/hloc/extract_features.py
@@ -504,26 +591,35 @@ class HlocLocalizer(BaseLocalizer):
     # code adapted from https://github.com/cvg/Hierarchical-Localization/blob/master/hloc/pairs_from_retrieval.py
     @torch.no_grad()
     def pairs_from_retrieval(self, query_global_descriptor, num_matched=20):
-        sim = torch.einsum("id,jd->ij", query_global_descriptor.to(self.device), self.map_global_descriptors.to(self.device))
-
+        if not hasattr(self, "map_global_descriptors") or self.map_global_descriptors is None:
+            raise RuntimeError(
+                "Map global descriptors are not loaded (missing or empty global_features.h5)"
+            )
+        db_names = getattr(self, "_retrieval_image_names", self.map_image_names)
+        sim = torch.einsum(
+            "id,jd->ij",
+            query_global_descriptor.to(self.device),
+            self.map_global_descriptors.to(self.device),
+        )
         invalid = np.full(shape=sim.shape, fill_value=False)
-        # NOTE(soeroesg): no self-matching can happen in live case. This must be a matrix with the same size as the similarity scores
         if num_matched > sim.shape[1]:
-            num_matched = sim.shape[1] # avoid the case when there are less actually similar images than we requested
+            num_matched = sim.shape[1]
         pairs = pairs_from_retrieval.pairs_from_score_matrix(sim, invalid, num_matched, min_score=0)
-
-        #pairs = [(query_names[i], db_names[j]) for i, j in pairs] # original hloc
-        pairs = [self.map_image_names[j] for i, j in pairs] # soeroesg: adapted because we have only a single query
-        return pairs
+        return [db_names[j] for i, j in pairs]
 
 
     # code adapted from https://github.com/cvg/Hierarchical-Localization/blob/master/hloc/match_features.py
     @torch.no_grad()
     def match_features(self, query_features, ref_pairs):
+        n_ref = len(ref_pairs)
+        if n_ref > 25:
+            print(f"Local feature matching: {n_ref} reference image(s)...", flush=True)
 
         # code pulled out from FeaturePairsDataset
         results = {}
-        for ref_name in ref_pairs:
+        for i, ref_name in enumerate(ref_pairs):
+            if n_ref > 25 and i > 0 and i % 10 == 0:
+                print(f"  matching progress: {i}/{n_ref}", flush=True)
             data = {}
             grp = query_features
             for k, v in grp.items():
@@ -662,6 +758,7 @@ class HlocLocalizer(BaseLocalizer):
         #print(query_local_descriptors)
         del query_image_data
 
+        query_global_descriptor = None
         # Global feature extraction (optional)
         print("Global feature extraction (optional)...")
         if self.retrieval_conf is not None:
@@ -672,19 +769,37 @@ class HlocLocalizer(BaseLocalizer):
             print(preproc_conf)
             query_image_data = self.extract_features_preprocess(query_image, preproc_conf)
             query_global_descriptor = self.extract_features_global(query_image_data)
-            #print(query_global_descriptor)
-        del query_image_data
+            del query_image_data
+
+        if self.retrieval_conf is not None:
+            self.ensure_map_global_descriptors()
 
         # Map image retrieval (optional)
-        print("Map image retrieval...")
+        print("Map image retrieval...", flush=True)
         ref_pairs = []
-        if self.retrieval_conf is not None:
+        if (
+            self.retrieval_conf is not None
+            and query_global_descriptor is not None
+            and getattr(self, "map_global_descriptors", None) is not None
+        ):
             ref_pairs = self.pairs_from_retrieval(query_global_descriptor, 20)
             print(f"Retrieval found {len(ref_pairs)} image pairs in the map.")
         else:
-            # NOTE: how do we choose which map frames to match with? Let's use all the db images.
+            if self.retrieval_conf is not None:
+                strategy = self.config.get("pairs_strategy", "unknown")
+                raise RuntimeError(
+                    "Map uses retrieval_conf but global_features.h5 is not loaded "
+                    f"(pairs_strategy={strategy}). Rebuild global features for this map in "
+                    "MapBuilder; online localization will not match all reference images."
+                )
             ref_pairs = [image.name for image in self.reconstruction.images.values()]
-            print(f"Skipped retreival, took all {len(ref_pairs)} images from the map.")
+            n_all = len(ref_pairs)
+            if n_all > 80:
+                raise RuntimeError(
+                    f"Map has {n_all} images and no retrieval_conf; "
+                    "online localization cannot match every reference image."
+                )
+            print(f"Skipped retrieval, matching {n_all} map images.", flush=True)
         db_names = ref_pairs # use another name to be consistent with the rest of the original code
 
         # Matches

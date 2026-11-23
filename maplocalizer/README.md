@@ -59,6 +59,10 @@ maxLoadedMaps=1
 ```
 The uploadsDir should point to the folder where your mapbuilder puts the maps.
 
+**Image retrieval:** When `config.yaml` sets `retrieval_conf`, online localization needs **`global_features.h5`** next to `features.h5` under `reconstruction_path`. **New MapBuilder runs** also write `global_features.h5` for `from_poses` / `from_exhaustive` maps (extra global-descriptor pass after local features). **Legacy maps** built before that change may lack the file — MapLocalizer refuses the old “match every image” fallback and returns a clear error instead.
+
+**Fix an existing map (e.g. `from_poses`):** Re-run the MapBuilder HLOC pipeline at least through **`hloc_extract_features`** (and keep `retrieval_conf` in the map config), or copy a completed map’s layout from a freshly built one. Confirm `hloc_reconstruction/global_features.h5` exists before relying on MapSelector auto-load.
+
 **Multi-map GPU policy:** `maxLoadedMaps` caps how many maps stay resident (default **1**). Before loading a map, MapLocalizer derives **`localization_model_signature`** from `config.yaml` (`feature_conf`, `matcher_conf`, `retrieval_conf`, `pairs_strategy`). Maps with a **different** signature are unloaded first so only one HLOC neural stack is on the GPU at a time. With `maxLoadedMaps>1`, only maps sharing the same signature may remain loaded together. The signature is also written to `coverage.json` at coverage compute time for the registry index.
 
 

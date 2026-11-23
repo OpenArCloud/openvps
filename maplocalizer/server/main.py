@@ -78,7 +78,11 @@ def _unload_map(map_id: str) -> None:
     global currentMapId
     localizer = localizers.pop(map_id, None)
     if localizer is not None and hasattr(localizer, "close"):
-        localizer.close()
+        try:
+            localizer.close()
+        except Exception as ex:
+            print(f"# unload_map {map_id}: close() failed (ignored): {ex}", flush=True)
+            traceback.print_exc()
     mapConfigs.pop(map_id, None)
     access_times.pop(map_id, None)
     map_localization_signatures.pop(map_id, None)
@@ -127,6 +131,7 @@ def load_map_core(map_id: str) -> Tuple[bool, str]:
     if map_id in mapConfigs and map_id in localizers:
         currentMapId = map_id
         _touch_map(map_id)
+        print(f"# load_map_core {map_id} already resident", flush=True)
         return True, ""
 
     map_path = allMapIdsAndPaths[map_id]
@@ -161,6 +166,7 @@ def load_map_core(map_id: str) -> Tuple[bool, str]:
                 break
 
     localizer: Optional[HlocLocalizer] = None
+    t0 = time.perf_counter()
     try:
         transform_path = map_path / "transform.json"
         map_config = HlocLocalizer.load_map_config(config_path, maps_root_docker, maps_root)
@@ -181,11 +187,13 @@ def load_map_core(map_id: str) -> Tuple[bool, str]:
         map_localization_signatures[map_id] = loc_sig
         currentMapId = map_id
         _touch_map(map_id)
+        print(f"# load_map_core {map_id} finished in {time.perf_counter() - t0:.1f}s", flush=True)
         return True, ""
     except Exception as ex:
         if localizer is not None:
             localizer.close()
         _unload_map(map_id)
+        print(f"# load_map_core {map_id} failed after {time.perf_counter() - t0:.1f}s: {ex}", flush=True)
         return False, f"Failed to load map {map_id}: {ex}"
 
 
@@ -358,15 +366,16 @@ async def localize(request: Request, response: Response):
         localizer = localizers[active_id]
 
         t_start = time.perf_counter()
+        print(f"# localize map_id={active_id} begin", flush=True)
         localizationResult = localizer.localize(queryImage, cameraParameters)
         _touch_map(active_id)
+        print(
+            f"# localize map_id={active_id} finished in {time.perf_counter() - t_start:.1f}s",
+            flush=True,
+        )
 
         if get_settings().debug:
             print(f"Localization result: {localizationResult}")
-
-        t_end = time.perf_counter()
-        if get_settings().debug:
-            print(f"Elapsed time: {t_end - t_start} ms")
         if len(localizationResult.geoposes) == 0 and len(localizationResult.framed_poses) == 0:
             errorMessage = f"Could not localize request {gppRequest.id}"
             print(errorMessage)
@@ -400,7 +409,7 @@ async def localize(request: Request, response: Response):
         return gppResponseExtended.to_json_dict()
 
     except Exception as e:
-        if get_settings().debug:
-            print(traceback.format_exc())
+        print(f"# localize failed: {e}")
+        print(traceback.format_exc())
         response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
         return {"ERROR": "Internal server error: " + str(e)}

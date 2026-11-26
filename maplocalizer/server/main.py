@@ -376,6 +376,10 @@ async def localize(request: Request, response: Response):
 
         if get_settings().debug:
             print(f"Localization result: {localizationResult}")
+
+        t_end = time.perf_counter()
+        if get_settings().debug:
+            print(f"Elapsed time: {t_end - t_start} ms")
         if len(localizationResult.geoposes) == 0 and len(localizationResult.framed_poses) == 0:
             errorMessage = f"Could not localize request {gppRequest.id}"
             print(errorMessage)

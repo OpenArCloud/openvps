@@ -252,6 +252,28 @@ The identity provider cannot be reached due to either a connection issue or the 
 ### FusionAuth login error
 We found that the FusionAuth container sometimes dies and this results in a misconfiguration error message on the login screen. In this occurs, restart the FusionAuth container.
 
+### Missing `global_features.h5` (legacy maps / MapLocalizer load failures)
+
+Maps that define `retrieval_conf` in `config.yaml` need **`global_features.h5`** next to `features.h5` under the COLMAP reconstruction directory. MapLocalizer loads those global descriptors for query-to-map image retrieval. New MapBuilder runs create the file automatically when pairing uses `from_exhaustive` or `from_poses` (only `from_retrieval` built it in older pipelines).
+
+Maps built before that pipeline change—or built with those pairing strategies—may be missing `global_features.h5`. MapLocalizer then fails at load time with a message that the file is missing for `pairs_strategy=from_poses` / `from_exhaustive`.
+
+Use the one-off script `mapbuilder/scripts_mapping/hloc_backfill_global_features.py` (not part of the normal MapBuilder GUI pipeline). The MapBuilder **backend** service image already includes it at `/app/scripts` and mounts your maps at `/uploads`.
+
+From the OpenVPS repo root (use your usual `docker compose` env file if you have one):
+
+```bash
+# One map (map UUID from the MapBuilder UI / uploads layout)
+docker compose exec backend python3 /app/scripts/hloc_backfill_global_features.py \
+  --uploads-dir /uploads --map-id <uuid>
+
+# Preview all maps under uploads without writing files
+docker compose exec backend python3 /app/scripts/hloc_backfill_global_features.py \
+  --uploads-dir /uploads --dry-run
+```
+
+Useful options: `--force` to regenerate an existing file; `--rewrite-from <host path>` and `--rewrite-to /uploads` if `config.yaml` still points at paths from outside the container. Re-run MapLocalizer pin load after a successful backfill.
+
 ### Docker image and GPU driver incompatibility
 nvidia CUDA Docker images: https://gitlab.com/nvidia/container-images/cuda/-/blob/master/doc/supported-tags.md?ref_type=heads
 

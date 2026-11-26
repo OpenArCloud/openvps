@@ -55,6 +55,7 @@ export interface HlocStages {
     hlocMapBuild: TaskDescription;
     hlocMapScaleEstimation: TaskDescription;
     hlocMapPlyExport: TaskDescription;
+    hlocMapCoverage?: TaskDescription;
     hlocMapZipExport: TaskDescription;
 }
 

@@ -8,7 +8,7 @@
 
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useCallback, useEffect, useState } from "react";
-import Map from "react-map-gl/dist/esm/exports-maplibre.js";
+import Map, { Layer, Source } from "react-map-gl/dist/esm/exports-maplibre.js";
 import { Canvas as MapLibreCanvas } from "react-three-map/dist/maplibre/es/main.mjs";
 import { PLYLoader } from "three-stdlib";
 import { Euler, Matrix4, Points, PointsMaterial, Quaternion, Vector3 } from "three";
@@ -19,6 +19,8 @@ import { MAX_PROGRESS } from "./page";
 // Greenwich Observatory, used as the visual fallback for maps without georeferencing.
 const FALLBACK_LATITUDE = 51.47684731776207;
 const FALLBACK_LONGITUDE = -0.0005196757942558923;
+
+const COVERAGE_SOURCE_ID = "openvps-coverage";
 
 export default function ThreeJsViewer({
   url,
@@ -33,6 +35,9 @@ export default function ThreeJsViewer({
   pointSize,
   setProgress,
   debugGeoPose,
+  coverageGeoJson,
+  showCoverageFootprint,
+  showCoverageAabb,
 }) {
   //console.log(session);
   const darkMode = useDarkMode();
@@ -63,6 +68,10 @@ export default function ThreeJsViewer({
     });
   }, [mapLongitude, mapLatitude]);
 
+  const hasFootprint =
+    coverageGeoJson?.features?.some((f) => f.properties?.kind === "footprint") ?? false;
+  const hasAabb = coverageGeoJson?.features?.some((f) => f.properties?.kind === "aabb") ?? false;
+
   return (
     <div style={{ height: "100%" }}>
       <Map
@@ -73,6 +82,13 @@ export default function ThreeJsViewer({
         onMove={(evt) => setViewState(evt.viewState)}
         onMouseDown={(event) => onPick(event)}
       >
+        {coverageGeoJson ? (
+          <CoverageMapLayers
+            data={coverageGeoJson}
+            showFootprint={showCoverageFootprint && hasFootprint}
+            showAabb={showCoverageAabb && hasAabb}
+          />
+        ) : null}
         {debugGeoPose ? (
           <MapLibreCanvas latitude={debugGeoPose.position.lat} longitude={debugGeoPose.position.lon}>
             <group rotate-x={-Math.PI / 2}>
@@ -99,6 +115,62 @@ export default function ThreeJsViewer({
         )}
       </Map>
     </div>
+  );
+}
+
+function CoverageMapLayers({ data, showFootprint, showAabb }) {
+  return (
+    <Source id={COVERAGE_SOURCE_ID} type="geojson" data={data}>
+      {showFootprint ? (
+        <>
+          <Layer
+            id="openvps-coverage-footprint-fill"
+            source={COVERAGE_SOURCE_ID}
+            type="fill"
+            filter={["==", ["get", "kind"], "footprint"]}
+            paint={{
+              "fill-color": "#e9c46a",
+              "fill-opacity": 0.22,
+            }}
+          />
+          <Layer
+            id="openvps-coverage-footprint-line"
+            source={COVERAGE_SOURCE_ID}
+            type="line"
+            filter={["==", ["get", "kind"], "footprint"]}
+            paint={{
+              "line-color": "#e9c46a",
+              "line-width": 2,
+            }}
+          />
+        </>
+      ) : null}
+      {showAabb ? (
+        <>
+          <Layer
+            id="openvps-coverage-aabb-fill"
+            source={COVERAGE_SOURCE_ID}
+            type="fill"
+            filter={["==", ["get", "kind"], "aabb"]}
+            paint={{
+              "fill-color": "#ef476f",
+              "fill-opacity": 0.08,
+            }}
+          />
+          <Layer
+            id="openvps-coverage-aabb-line"
+            source={COVERAGE_SOURCE_ID}
+            type="line"
+            filter={["==", ["get", "kind"], "aabb"]}
+            paint={{
+              "line-color": "#ef476f",
+              "line-width": 2,
+              "line-dasharray": [2, 2],
+            }}
+          />
+        </>
+      ) : null}
+    </Source>
   );
 }
 

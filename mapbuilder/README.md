@@ -72,8 +72,21 @@ AUTH_FUSIONAUTH_SECRET=
 AUTH_FUSIONAUTH_ISSUER=
 AUTH_SECRET=
 
-MAPLOCALIZER_URL=
+MAPLOCALIZER_URL=http://localhost:8043
+MAPREGISTRY_URL=http://localhost:8044
 ```
+
+See `Backend/.env.example` for full comments (in-cluster URLs, operator-only `MAPSELECTOR_*`).
+
+When `MAPREGISTRY_URL` is set, MapBuilder writes `coverage.json` under each `hlocMaps/<mapId>/` directory (via `compute_map_coverage.py`) after the HLOC **Coverage** pipeline stage and after saving a map **transform**, then calls MapRegistry `POST /internal/reload` so the registry re-ingests that map.
+
+The localization pin in the UI calls MapLocalizer via **`MAPLOCALIZER_URL`** (in-cluster / host port **8043**), not MapSelector. AR clients use **`MAPSELECTOR_URL`** on port **8046** (see root README **NGINX and GeoPose**).
+
+`coverage.json` includes **`localization_model_signature`** (from map `config.yaml`) for MapRegistry / multi-map GPU policy.
+
+Coverage footprints use **filtered COLMAP points3D** (track length, reprojection error, horizontal distance-to-cameras), then a **convex hull** in lon/lat. The **Coverage** HLOC run stage in the MapBuilder GUI exposes the same parameters as `compute_map_coverage.py` (preset, track length, reprojection error, horizontal radius, percentile).
+
+Run coverage filter unit tests: `python -m pytest mapbuilder/scripts_mapping/test_coverage_points.py`
 
 Run the server:
 ```

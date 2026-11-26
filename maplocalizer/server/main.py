@@ -9,9 +9,11 @@
 from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 
+import json
 import time
 import datetime
 import traceback
+from pathlib import Path
 from typing import Dict, Optional, Set, Tuple
 
 from oscp.geoposeprotocol import GeoPoseRequest, verify_version_header
@@ -24,6 +26,7 @@ import numpy as np
 import cv2
 
 from hloc_localizer import HlocLocalizer
+from map_model_gate import localization_model_signature_from_config_path
 
 from test_gpu import getGpuInfo
 
@@ -53,6 +56,7 @@ localizers: Dict[str, object] = {}
 currentMapId: Optional[str] = None
 
 access_times: Dict[str, float] = {}
+map_localization_signatures: Dict[str, str] = {}
 
 # print the env file
 print(get_settings())
@@ -74,11 +78,27 @@ def _unload_map(map_id: str) -> None:
     global currentMapId
     localizer = localizers.pop(map_id, None)
     if localizer is not None and hasattr(localizer, "close"):
-        localizer.close()
+        try:
+            localizer.close()
+        except Exception as ex:
+            print(f"# unload_map {map_id}: close() failed (ignored): {ex}", flush=True)
+            traceback.print_exc()
     mapConfigs.pop(map_id, None)
     access_times.pop(map_id, None)
+    map_localization_signatures.pop(map_id, None)
     if currentMapId == map_id:
         currentMapId = None
+
+
+def _evict_incompatible_model_signatures(required_sig: str, exempt: Set[str]) -> None:
+    """Unload maps that use a different HLOC NN stack (GPU cannot mix weights safely)."""
+    for mid in list(localizers.keys()):
+        if mid in exempt:
+            continue
+        loaded_sig = map_localization_signatures.get(mid)
+        if loaded_sig is not None and loaded_sig != required_sig:
+            print(f"# evict map {mid}: localization_model_signature mismatch")
+            _unload_map(mid)
 
 
 def _evict_one_lru(exempt: Set[str]) -> None:
@@ -111,7 +131,31 @@ def load_map_core(map_id: str) -> Tuple[bool, str]:
     if map_id in mapConfigs and map_id in localizers:
         currentMapId = map_id
         _touch_map(map_id)
+        print(f"# load_map_core {map_id} already resident", flush=True)
         return True, ""
+
+    map_path = allMapIdsAndPaths[map_id]
+    config_path = map_path / "config.yaml"
+    loc_sig, loc_err, loc_desc = localization_model_signature_from_config_path(config_path)
+    if loc_sig is None:
+        return False, loc_err or f"Failed to read localization model signature for {map_id}"
+    if loc_desc is not None:
+        print(f"# map {map_id} HLOC conf: {loc_desc}")
+
+    coverage_path = Path(map_path) / "coverage.json"
+    if coverage_path.is_file():
+        try:
+            cov = json.loads(coverage_path.read_text(encoding="utf-8"))
+            cov_sig = cov.get("localization_model_signature")
+            if cov_sig is not None and str(cov_sig) != loc_sig:
+                print(
+                    f"# warning: map {map_id} coverage.json localization_model_signature "
+                    f"!= config.yaml; using config.yaml"
+                )
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    _evict_incompatible_model_signatures(loc_sig, {map_id})
 
     limit = settings.maxLoadedMaps
     if limit > 0:
@@ -122,9 +166,8 @@ def load_map_core(map_id: str) -> Tuple[bool, str]:
                 break
 
     localizer: Optional[HlocLocalizer] = None
+    t0 = time.perf_counter()
     try:
-        map_path = allMapIdsAndPaths[map_id]
-        config_path = map_path / "config.yaml"
         transform_path = map_path / "transform.json"
         map_config = HlocLocalizer.load_map_config(config_path, maps_root_docker, maps_root)
         if map_config is None:
@@ -141,13 +184,16 @@ def load_map_core(map_id: str) -> Tuple[bool, str]:
 
         localizer.load_map(map_config, map_id=map_id)
         localizers[map_id] = localizer
+        map_localization_signatures[map_id] = loc_sig
         currentMapId = map_id
         _touch_map(map_id)
+        print(f"# load_map_core {map_id} finished in {time.perf_counter() - t0:.1f}s", flush=True)
         return True, ""
     except Exception as ex:
         if localizer is not None:
             localizer.close()
         _unload_map(map_id)
+        print(f"# load_map_core {map_id} failed after {time.perf_counter() - t0:.1f}s: {ex}", flush=True)
         return False, f"Failed to load map {map_id}: {ex}"
 
 
@@ -172,7 +218,14 @@ def gpu_info():
 def health():
     s = get_settings()
     loaded = list(localizers.keys())
-    return {"status": "ok", "workerId": s.workerId, "loaded_map_ids": loaded, "current_map_id": currentMapId}
+    return {
+        "status": "ok",
+        "workerId": s.workerId,
+        "loaded_map_ids": loaded,
+        "current_map_id": currentMapId,
+        "localization_model_signatures": dict(map_localization_signatures),
+        "maxLoadedMaps": s.maxLoadedMaps,
+    }
 
 
 @app.get("/ready")
@@ -313,8 +366,13 @@ async def localize(request: Request, response: Response):
         localizer = localizers[active_id]
 
         t_start = time.perf_counter()
+        print(f"# localize map_id={active_id} begin", flush=True)
         localizationResult = localizer.localize(queryImage, cameraParameters)
         _touch_map(active_id)
+        print(
+            f"# localize map_id={active_id} finished in {time.perf_counter() - t_start:.1f}s",
+            flush=True,
+        )
 
         if get_settings().debug:
             print(f"Localization result: {localizationResult}")
@@ -355,7 +413,7 @@ async def localize(request: Request, response: Response):
         return gppResponseExtended.to_json_dict()
 
     except Exception as e:
-        if get_settings().debug:
-            print(traceback.format_exc())
+        print(f"# localize failed: {e}")
+        print(traceback.format_exc())
         response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
         return {"ERROR": "Internal server error: " + str(e)}

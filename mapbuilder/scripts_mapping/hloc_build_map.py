@@ -99,6 +99,24 @@ def hloc_build_map(config):
 
             extract_features.main(feature_conf, images_path, image_list=image_names, feature_path=features_path)
 
+            # Online localization (MapLocalizer) needs map-side global descriptors whenever
+            # retrieval_conf is set. Only pairs_strategy=from_retrieval builds this file today.
+            pairs_strategy = cfg.get("pairs_strategy")
+            retrieval_name = cfg.get("retrieval_conf")
+            if retrieval_name and pairs_strategy != "from_retrieval":
+                if not global_features_path.is_file():
+                    print(
+                        "Building global_features.h5 for online localization "
+                        f"(pairs_strategy={pairs_strategy} does not create it during pairing)."
+                    )
+                    retrieval_conf = extract_features.confs[retrieval_name]
+                    extract_features.main(
+                        retrieval_conf,
+                        images_path,
+                        image_list=image_names,
+                        feature_path=global_features_path,
+                    )
+
         if program_includes('hloc_find_image_pairs'):
             cfg = config['hloc_reconstruction']
             pairs_strategy = cfg['pairs_strategy']

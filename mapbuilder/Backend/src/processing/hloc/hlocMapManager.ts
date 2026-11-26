@@ -11,8 +11,8 @@ import _ from "lodash";
 import {HlocCreator} from "./hlocCreator";
 import {v4 as uuidv4} from "uuid";
 import path from "node:path";
-import {PipelineStageSettings, resolvePipelineStageSettings, resolveStageSettings} from "../stageSettings";
-import {HlocFormatStage, HlocImageFilterStage, HlocConfigurationStage, HlocMapBuildStage, HlocMapScaleEstimationStage, HlocMapPlyExportStage, HlocMapZipExportStage, getHlocStageSettingsSchemas} from "./hlocStages";
+import {PipelineStageSettings, resolvePipelineStageSettings} from "../stageSettings";
+import {HlocFormatStage, HlocImageFilterStage, HlocConfigurationStage, HlocMapBuildStage, HlocMapScaleEstimationStage, HlocMapPlyExportStage, HlocMapCoverageStage, HlocMapZipExportStage, getHlocStageSettingsSchemas} from "./hlocStages";
 
 export function getHlocMapWorkDirectory(mapUploadRoot: string, hlocMapId: string) {
     return path.join(mapUploadRoot, "hlocMaps", hlocMapId);
@@ -33,6 +33,7 @@ export class HlocMapManager {
 
     public addMap(hlocState: HlocCreationState) {
         hlocState.stageSettings = coerceLegacyStageSettings(hlocState);
+        ensureHlocCoverageTask(hlocState);
         this.hlocMaps.set(hlocState.mapId, new HlocCreator(hlocState, this.uploadLocation, this.hlocStatusUpdate, this.config));
     }
 
@@ -76,6 +77,10 @@ export class HlocMapManager {
                     },
                     hlocMapPlyExport: {
                         type: "hlocMapPlyExport",
+                        status: TaskStatus.failed,
+                    },
+                    hlocMapCoverage: {
+                        type: "hlocMapCoverage",
                         status: TaskStatus.failed,
                     },
                     hlocMapZipExport: {
@@ -122,6 +127,10 @@ export class HlocMapManager {
                 },
                 hlocMapPlyExport: {
                     type: HlocMapPlyExportStage.stageName,
+                    status: TaskStatus.notStarted,
+                },
+                hlocMapCoverage: {
+                    type: HlocMapCoverageStage.stageName,
                     status: TaskStatus.notStarted,
                 },
                 hlocMapZipExport: {
@@ -172,6 +181,15 @@ export class HlocMapManager {
             return mapProcessor.getAllMapDataDownloadLink();
         }
         console.error(`Map ${hlocMapId} not found`);
+    }
+}
+
+function ensureHlocCoverageTask(hlocState: HlocCreationState): void {
+    if (!hlocState.tasks.hlocMapCoverage) {
+        hlocState.tasks.hlocMapCoverage = {
+            type: HlocMapCoverageStage.stageName,
+            status: TaskStatus.notStarted,
+        };
     }
 }
 

@@ -1,6 +1,9 @@
-# Copyright 2025 Nokia
+# Copyright 2026 Nokia
 # Licensed under the MIT License.
 # SPDX-License-Identifier: MIT
+
+# This file is part of OpenVPS: Open Visual Positioning Service
+# Author: Gabor Soros (gabor.soros@nokia-bell-labs.com)
 
 name: openvps
 services:
@@ -29,6 +32,7 @@ services:
       - AUTH_FUSIONAUTH_ISSUER=${AUTH_FUSIONAUTH_ISSUER}
       - AUTH_SECRET=${AUTH_SECRET}
       - MAPLOCALIZER_URL=http://maplocalizer:8000
+      - MAPREGISTRY_URL=http://mapregistry:8101
       - NODE_TLS_REJECT_UNAUTHORIZED=0
     volumes:
       - ${MY_SHARED_MAPS_DIR}:/uploads
@@ -69,6 +73,43 @@ services:
     ports:
       - ${MAPALIGNER_PORT}:3001
 
+  mapregistry:
+    build:
+      context: mapregistry
+      dockerfile: Dockerfile
+    depends_on:
+      backend:
+        condition: service_healthy
+    volumes:
+      - ${MY_SHARED_MAPS_DIR}:/uploads
+    environment:
+      - UPLOADS_DIR=/uploads
+      - REGISTRY_INDEX_PATH=/uploads/map_registry.json
+    ports:
+      - ${MAPREGISTRY_PORT:-8044}:8101
+    deploy:
+      restart_policy:
+        condition: unless-stopped
+
+  mapselector:
+    build:
+      context: mapselector
+      dockerfile: Dockerfile
+    depends_on:
+      mapregistry:
+        condition: service_started
+      maplocalizer:
+        condition: service_started
+    environment:
+      - MAPREGISTRY_URL=http://mapregistry:8101
+      - MAPLOCALIZER_URL=http://maplocalizer:8000
+      - MAPSELECTOR_LOCALIZE_TIMEOUT_S=${MAPSELECTOR_LOCALIZE_TIMEOUT_S:-600}
+    ports:
+      - ${MAPSELECTOR_PORT:-8046}:8102
+    deploy:
+      restart_policy:
+        condition: unless-stopped
+
   maplocalizer:
     build:
       context: maplocalizer
@@ -96,7 +137,7 @@ services:
               capabilities: [gpu]
     shm_size: 4GB
     ports:
-      - ${MAPLOCALIZER_PORT}:8000
+      - ${MAPLOCALIZER_PORT:-8043}:8000
 
   frontend:
     build:

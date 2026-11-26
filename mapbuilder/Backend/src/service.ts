@@ -21,6 +21,8 @@ import {DataSetStatus, DataSet, TaskStatus} from "./dataSet";
 import {ExtractTask} from "./processing/extractTask";
 import {ThumbnailTask} from "./processing/thumbnailTask";
 import {authConfig} from "./auth";
+import {computeMapCoverageAndNotify, coverageSettingsForMap, readHlocCoverage} from "./mapCoverage";
+import {getHlocMapWorkDirectory} from "./processing/hloc/hlocMapManager";
 import {readHlocTransform, saveHlocTransform} from "./transform";
 import {StageSettingsStore} from "./processing/stageSettingsStore";
 import {getHlocConfiguredStageSettingsSchemas, HlocConfigurationStage, HlocMapScaleEstimationStage} from "./processing/hloc/hlocStages";
@@ -367,19 +369,38 @@ export function startRestService(statuses: DataSetStatus[], config: Environmenta
         const datasetId = req.params.id;
         const mapId = req.params.mapId;
         try {
-            const geoPose = readHlocTransform(datasetId, mapId, config);
-            res.status(200).send(geoPose);
+            const worldAlignment = readHlocTransform(datasetId, mapId, config);
+            res.status(200).send(worldAlignment);
         } catch (error) {
             console.error("Error loading transform", error);
             res.status(500).send(`Error loading transform`);
         }
     });
 
-    app.post("/maps/:id/hloc/:mapId/transform", protectedRoute, (req: Request, res: Response) => {
+    app.get("/maps/:id/hloc/:mapId/coverage", protectedRoute, (req: Request, res: Response) => {
+        const datasetId = req.params.id;
+        const mapId = req.params.mapId;
+        const coverage = readHlocCoverage(datasetId, mapId, config);
+        if (coverage === null) {
+            res.status(404).send("coverage.json missing");
+            return;
+        }
+        res.status(200).json(coverage);
+    });
+
+    app.post("/maps/:id/hloc/:mapId/transform", protectedRoute, async (req: Request, res: Response) => {
         const datasetId = req.params.id;
         const mapId = req.params.mapId;
         try {
             saveHlocTransform(datasetId, mapId, req.body, config);
+            const mapWorkDir = getHlocMapWorkDirectory(path.join(config.uploadsDir, datasetId), mapId);
+            const coverageSettings = coverageSettingsForMap(
+                config.uploadsDir,
+                datasetId,
+                mapId,
+                taskManager.getStatusOfProcess(datasetId),
+            );
+            await computeMapCoverageAndNotify(datasetId, mapId, mapWorkDir, config, coverageSettings);
             res.status(200).send(req.body);
         } catch (error) {
             console.error("Error saving transform:", error);

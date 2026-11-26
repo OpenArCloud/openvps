@@ -1,0 +1,5 @@
+# Map registry API — ingest-only (coverage.json from MapBuilder; no pycolmap).
+fastapi[standard]>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.0
+pydantic-settings>=2.0

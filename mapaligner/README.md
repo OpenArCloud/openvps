@@ -2,6 +2,8 @@
 
 With this tool, point clouds from the MapBuilder service can be loaded and manually aligned to OpenStreetMap buildings. The resulting 3D transform matrix can be saved into MapBuilder or exported/imported in JSON format.
 
+When `coverage.json` exists for a map (including after saving a geo-anchored transform), MapAligner overlays **geo footprint** and **geo AABB** on the basemap. Use the **Coverage** toggles on the left edge of the map view.
+
 This component is part of OpenVPS: Open Visual Positioning Service.
 
 Authors: Andor Kovacs (@KovacsA22), Gabor Soros (@soeroesg)

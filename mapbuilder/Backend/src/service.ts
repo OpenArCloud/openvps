@@ -417,7 +417,16 @@ function coerceHlocRegisterSettings(requestBody: unknown): Record<string, unknow
     };
 }
 
+// Optional static token for machine-to-machine clients (e.g. backoffice
+// services). When SERVICE_TOKEN is set, requests with a matching Bearer
+// header bypass the session check; browser users are unaffected.
+const SERVICE_TOKEN = process.env.SERVICE_TOKEN;
+
 async function protectedRoute(req: Request, res: Response, next: NextFunction) {
+    if (SERVICE_TOKEN && req.headers.authorization === `Bearer ${SERVICE_TOKEN}`) {
+        next();
+        return;
+    }
     const session = res.locals.session ?? (await getSession(req, authConfig));
     if (!session?.user) {
         res.status(401).send("Unauthorized");
